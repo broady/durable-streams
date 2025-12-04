@@ -1,28 +1,35 @@
 # Durable Stream
 
-**HTTP-based durable, append-only byte streams for the web**
+**Open protocol for real-time sync to client applications**
 
-Durable Stream provides a simple, web-native protocol for creating and consuming ordered, replayable data streams with support for catch-up reads and live tailing.
+HTTP-based durable streams for streaming data reliably to web browsers, mobile apps, and native clients with offset-based resumability.
 
-## Why Durable Streams?
+Durable Stream provides a simple, production-proven protocol for creating and consuming ordered, replayable data streams with support for catch-up reads and live tailing.
 
-Modern applications frequently need ordered, durable sequences of data that can be replayed from arbitrary points and tailed in real time:
+## The Missing Primitive
 
-- **Database synchronization** - Stream database changes to clients
-- **Event sourcing** - Build event-sourced architectures
-- **Collaborative editing** - Sync CRDTs and operational transforms
-- **AI conversations** - Stream and replay LLM interactions
-- **Workflow execution** - Track state changes over time
-- **Real-time updates** - Push application state to clients
+Modern applications frequently need ordered, durable sequences of data that can be replayed from arbitrary points and tailed in real time. Common patterns include:
 
-While these patterns are widespread, the web platform lacks a simple, first-class primitive for durable streams. Applications typically implement ad-hoc solutions using combinations of databases, queues, and polling mechanisms.
+- **AI conversation streaming** - Stream LLM token responses with resume capability across reconnections
+- **Database synchronization** - Stream database changes to web, mobile, and native clients
+- **Collaborative editing** - Sync CRDTs and operational transforms across devices
+- **Real-time updates** - Push application state to clients with guaranteed delivery
+- **Event sourcing** - Build event-sourced architectures with client-side replay
+- **Workflow execution** - Stream workflow state changes with full history
 
-Durable Stream provides a **minimal HTTP-based protocol** that's:
+While durable streams exist throughout backend infrastructure (database WALs, Kafka topics, event stores), they aren't available as a first-class primitive for client applications. There's no simple, HTTP-based durable stream that sits alongside databases and object storage as a standard cloud primitive.
 
-- 🌐 **Web-native** - Built on standard HTTP with no custom protocols
-- 📦 **Simple** - Just URLs, standard HTTP methods, and a few headers
+Applications typically implement ad-hoc solutions for resumable streaming—combinations of databases, queues, polling mechanisms, and custom offset tracking. Most implementations handle reconnection poorly: streaming responses break when clients switch tabs, experience brief network interruptions, or refresh pages.
+
+**Durable Stream addresses this gap.** It's a minimal HTTP-based protocol for durable, offset-based streaming designed for client applications across all platforms: web browsers, mobile apps, native clients, IoT devices, and edge workers. Based on 1.5 years of production use at Electric for real-time Postgres sync.
+
+The protocol provides:
+
+- 🌐 **Universal** - Works anywhere HTTP works: web browsers, mobile apps, native clients, IoT devices, edge workers
+- 📦 **Simple** - Built on standard HTTP with no custom protocols
 - 🔄 **Resumable** - Offset-based reads let you resume from any point
-- ⚡ **Real-time** - Long-poll and SSE modes for live tailing
+- ⚡ **Real-time** - Long-poll and SSE modes for live tailing with catch-up from any offset
+- 💰 **Economical** - HTTP-native design leverages CDN infrastructure for efficient scaling
 - 🎯 **Flexible** - Content-type agnostic byte streams
 - 🔌 **Composable** - Build higher-level abstractions on top
 
@@ -110,6 +117,34 @@ Durable Stream is built on a simple HTTP-based protocol. See [PROTOCOL.md](./PRO
 - Content-type preservation
 - CDN-friendly caching and request collapsing
 
+## Relationship to Backend Streaming Systems
+
+Backend streaming systems like Kafka, RabbitMQ, and Kinesis excel at server-to-server messaging and backend event processing. Durable Stream complements these systems by solving a different problem: **reliably streaming data to client applications**.
+
+The challenges of streaming to clients are distinct from server-to-server streaming:
+
+- **Client diversity** - Supporting web browsers, mobile apps, native clients, each with different capabilities and constraints
+- **Network unreliability** - Clients disconnect constantly (backgrounded tabs, network switches, page refreshes)
+- **Resumability requirements** - Clients need to pick up exactly where they left off without data loss
+- **Economics** - Per-connection costs make dedicated connections to millions of clients prohibitive
+- **Protocol compatibility** - Kafka/AMQP protocols don't run in browsers or on most mobile platforms
+- **Data shaping and authorization** - Backend streams typically contain raw, unfiltered events; client streams need per-user filtering, transformation, and authorization applied
+
+**Complementary architecture:**
+
+```
+Kafka/RabbitMQ → Application Server → Durable Streams → Clients
+(server-to-server)   (shapes data,      (server-to-client)
+                      authorizes)
+```
+
+Your application server consumes from backend streaming systems, applies authorization logic, shapes data for specific clients, and fans out via Durable Streams. This separation allows:
+
+- Backend systems to optimize for throughput, partitioning, and server-to-server reliability
+- Application servers to enforce authorization boundaries and transform data
+- Durable Streams to optimize for HTTP compatibility, CDN leverage, and client resumability
+- Each layer to use protocols suited to its environment
+
 ## Running Your Own Server
 
 ### Node.js Reference Implementation
@@ -164,7 +199,7 @@ durable-stream delete my-stream
 
 ### Database Sync
 
-Stream database changes to clients for real-time synchronization:
+Stream database changes to web and mobile clients for real-time synchronization:
 
 ```typescript
 // Server: stream database changes
@@ -172,7 +207,7 @@ for (const change of db.changes()) {
   await stream.append(JSON.stringify(change))
 }
 
-// Client: receive and apply changes
+// Client: receive and apply changes (works in browsers, React Native, native apps)
 for await (const chunk of stream.follow({ live: "long-poll" })) {
   const change = JSON.parse(new TextDecoder().decode(chunk.data))
   applyChange(change)
@@ -196,7 +231,7 @@ const state = events.reduce(applyEvent, initialState)
 
 ### AI Conversation Streaming
 
-Stream LLM responses with full conversation history:
+Stream LLM responses with full conversation history accessible across devices:
 
 ```typescript
 // Stream AI response chunks
@@ -204,7 +239,7 @@ for await (const token of llm.stream(prompt)) {
   await stream.append(token)
 }
 
-// Client can resume from any point
+// Client can resume from any point (switch devices, refresh page, reconnect)
 for await (const chunk of stream.follow({
   offset: lastSeenOffset,
   live: "sse",
