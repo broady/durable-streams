@@ -13,7 +13,8 @@
       "Bash(pnpm lint:fix:*)",
       "Bash(gh org list:*)",
       "Bash(pnpm typecheck:*)",
-      "Bash(pnpm test:conformance:*)"
+      "Bash(pnpm test:conformance:*)",
+      "WebFetch(domain:electric-sql.com)"
     ],
     "deny": [],
     "ask": []
