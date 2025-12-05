@@ -98,7 +98,7 @@ describe(`DurableStream`, () => {
           status: 200,
           headers: {
             "content-type": `application/json`,
-            "stream-offset": `1_0`,
+            "Stream-Next-Offset": `1_0`,
             etag: `abc123`,
           },
         })
@@ -175,7 +175,7 @@ describe(`DurableStream`, () => {
           status: 200,
           headers: {
             "content-type": `text/plain`,
-            "stream-offset": `1_11`,
+            "Stream-Next-Offset": `1_11`,
           },
         })
       )
@@ -199,7 +199,7 @@ describe(`DurableStream`, () => {
       mockFetch.mockResolvedValue(
         new Response(`data`, {
           status: 200,
-          headers: { "stream-offset": `2_5` },
+          headers: { "Stream-Next-Offset": `2_5` },
         })
       )
 
@@ -220,7 +220,7 @@ describe(`DurableStream`, () => {
       mockFetch.mockResolvedValue(
         new Response(`data`, {
           status: 200,
-          headers: { "stream-offset": `1_5` },
+          headers: { "Stream-Next-Offset": `1_5` },
         })
       )
 
@@ -242,8 +242,8 @@ describe(`DurableStream`, () => {
         new Response(`data`, {
           status: 200,
           headers: {
-            "stream-offset": `1_5`,
-            "stream-up-to-date": `true`,
+            "Stream-Next-Offset": `1_5`,
+            "Stream-Up-To-Date": `true`,
           },
         })
       )
@@ -425,7 +425,7 @@ describe(`DurableStream`, () => {
         expect.anything(),
         expect.objectContaining({
           headers: expect.objectContaining({
-            "stream-seq": `123`,
+            "Stream-Seq": `123`,
           }),
         })
       )
@@ -500,7 +500,7 @@ describe(`DurableStream`, () => {
           status: 200,
           headers: {
             "content-type": `text/plain`,
-            "stream-offset": `5_100`,
+            "Stream-Next-Offset": `5_100`,
           },
         })
       )
@@ -534,11 +534,12 @@ describe(`DurableStream`, () => {
 
   describe(`auth`, () => {
     it(`should include token auth header`, async () => {
-      const mockFetch = vi
-        .fn()
-        .mockResolvedValue(
-          new Response(null, { status: 200, headers: { "stream-offset": `0` } })
-        )
+      const mockFetch = vi.fn().mockResolvedValue(
+        new Response(null, {
+          status: 200,
+          headers: { "Stream-Next-Offset": `0` },
+        })
+      )
 
       const stream = new DurableStream({
         url: `https://example.com/stream`,
@@ -559,11 +560,12 @@ describe(`DurableStream`, () => {
     })
 
     it(`should include custom auth header name`, async () => {
-      const mockFetch = vi
-        .fn()
-        .mockResolvedValue(
-          new Response(null, { status: 200, headers: { "stream-offset": `0` } })
-        )
+      const mockFetch = vi.fn().mockResolvedValue(
+        new Response(null, {
+          status: 200,
+          headers: { "Stream-Next-Offset": `0` },
+        })
+      )
 
       const stream = new DurableStream({
         url: `https://example.com/stream`,
@@ -584,11 +586,12 @@ describe(`DurableStream`, () => {
     })
 
     it(`should include static auth headers`, async () => {
-      const mockFetch = vi
-        .fn()
-        .mockResolvedValue(
-          new Response(null, { status: 200, headers: { "stream-offset": `0` } })
-        )
+      const mockFetch = vi.fn().mockResolvedValue(
+        new Response(null, {
+          status: 200,
+          headers: { "Stream-Next-Offset": `0` },
+        })
+      )
 
       const stream = new DurableStream({
         url: `https://example.com/stream`,
@@ -609,11 +612,12 @@ describe(`DurableStream`, () => {
     })
 
     it(`should resolve async auth headers`, async () => {
-      const mockFetch = vi
-        .fn()
-        .mockResolvedValue(
-          new Response(null, { status: 200, headers: { "stream-offset": `0` } })
-        )
+      const mockFetch = vi.fn().mockResolvedValue(
+        new Response(null, {
+          status: 200,
+          headers: { "Stream-Next-Offset": `0` },
+        })
+      )
 
       const stream = new DurableStream({
         url: `https://example.com/stream`,
@@ -640,11 +644,12 @@ describe(`DurableStream`, () => {
 
   describe(`params`, () => {
     it(`should include custom query params`, async () => {
-      const mockFetch = vi
-        .fn()
-        .mockResolvedValue(
-          new Response(null, { status: 200, headers: { "stream-offset": `0` } })
-        )
+      const mockFetch = vi.fn().mockResolvedValue(
+        new Response(null, {
+          status: 200,
+          headers: { "Stream-Next-Offset": `0` },
+        })
+      )
 
       const stream = new DurableStream({
         url: `https://example.com/stream`,
