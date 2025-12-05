@@ -40,12 +40,10 @@ interface StreamMetadata {
  */
 interface PooledHandle {
   stream: fs.WriteStream
-  dirty: boolean
 }
 
 class FileHandlePool {
   private cache: SieveCache<string, PooledHandle>
-  private dirty = new Set<string>()
 
   constructor(maxSize: number) {
     this.cache = new SieveCache<string, PooledHandle>(maxSize, {
@@ -63,59 +61,43 @@ class FileHandlePool {
 
     if (!handle) {
       const stream = fs.createWriteStream(filePath, { flags: `a` })
-      handle = { stream, dirty: false }
+      handle = { stream }
       this.cache.set(filePath, handle)
     }
 
     return handle.stream
   }
 
-  markDirty(filePath: string): void {
+  /**
+   * Flush a specific file to disk immediately.
+   * This is called after each append to ensure durability.
+   */
+  async fsyncFile(filePath: string): Promise<void> {
     const handle = this.cache.get(filePath)
-    if (handle) {
-      handle.dirty = true
-      this.dirty.add(filePath)
-    }
-  }
+    if (!handle) return
 
-  async fsyncDirty(): Promise<void> {
-    const promises = Array.from(this.dirty).map((filePath) => {
-      const handle = this.cache.get(filePath)
-      if (!handle) return Promise.resolve()
+    return new Promise<void>((resolve, reject) => {
+      // Use fdatasync (faster than fsync, skips metadata)
+      // Cast to any to access fd property (exists at runtime but not in types)
+      const fd = (handle.stream as any).fd
 
-      return new Promise<void>((resolve, reject) => {
-        // Use fdatasync (faster than fsync, skips metadata)
-        // Cast to any to access fd property (exists at runtime but not in types)
-        const fd = (handle.stream as any).fd
+      // If fd is null, stream hasn't been opened yet - skip fsync
+      if (typeof fd !== `number`) {
+        resolve()
+        return
+      }
 
-        // If fd is null, stream hasn't been opened yet - skip fsync
-        if (typeof fd !== `number`) {
-          handle.dirty = false
-          this.dirty.delete(filePath)
-          resolve()
-          return
-        }
-
-        fs.fdatasync(fd, (err) => {
-          if (err) reject(err)
-          else {
-            handle.dirty = false
-            this.dirty.delete(filePath)
-            resolve()
-          }
-        })
+      fs.fdatasync(fd, (err) => {
+        if (err) reject(err)
+        else resolve()
       })
     })
-
-    await Promise.all(promises)
   }
 
   async closeAll(): Promise<void> {
-    await this.fsyncDirty()
-
     const promises: Array<Promise<void>> = []
-    for (const [key, handle] of this.cache.entries()) {
-      promises.push(this.closeHandle(key, handle))
+    for (const [_key, handle] of this.cache.entries()) {
+      promises.push(this.closeHandle(handle))
     }
 
     await Promise.all(promises)
@@ -129,36 +111,13 @@ class FileHandlePool {
   async closeFileHandle(filePath: string): Promise<void> {
     const handle = this.cache.get(filePath)
     if (handle) {
-      await this.closeHandle(filePath, handle)
+      await this.closeHandle(handle)
       this.cache.delete(filePath)
     }
   }
 
-  private async closeHandle(
-    filePath: string,
-    handle: PooledHandle
-  ): Promise<void> {
-    // Fsync if dirty before closing
-    if (handle.dirty) {
-      const fd = (handle.stream as any).fd
-
-      // Only fsync if fd is available
-      if (typeof fd === `number`) {
-        await new Promise<void>((resolve, reject) => {
-          fs.fdatasync(fd, (err) => {
-            if (err) reject(err)
-            else {
-              this.dirty.delete(filePath)
-              resolve()
-            }
-          })
-        })
-      } else {
-        this.dirty.delete(filePath)
-      }
-    }
-
-    // Close the stream
+  private async closeHandle(handle: PooledHandle): Promise<void> {
+    // Close the stream (data is already fsynced on each append)
     return new Promise<void>((resolve) => {
       handle.stream.end(() => resolve())
     })
@@ -167,7 +126,6 @@ class FileHandlePool {
 
 export interface FileBackedStreamStoreOptions {
   dataDir: string
-  fsyncIntervalMs?: number
   maxFileHandles?: number
 }
 
@@ -192,8 +150,6 @@ export class FileBackedStreamStore {
   private fileManager: StreamFileManager
   private fileHandlePool: FileHandlePool
   private pendingLongPolls: Array<PendingLongPoll> = []
-  private fsyncTimer: NodeJS.Timeout | null = null
-  private fsyncIntervalMs: number
   private dataDir: string
   /**
    * In-memory buffer for recent appends per stream.
@@ -204,7 +160,6 @@ export class FileBackedStreamStore {
 
   constructor(options: FileBackedStreamStoreOptions) {
     this.dataDir = options.dataDir
-    this.fsyncIntervalMs = options.fsyncIntervalMs ?? 1000
 
     // Initialize LMDB
     this.db = openLMDB({
@@ -219,22 +174,8 @@ export class FileBackedStreamStore {
     const maxFileHandles = options.maxFileHandles ?? 100
     this.fileHandlePool = new FileHandlePool(maxFileHandles)
 
-    // Start periodic fsync
-    this.startFsyncTimer()
-
     // Recover from disk
     this.recover()
-  }
-
-  /**
-   * Start periodic fsync timer.
-   */
-  private startFsyncTimer(): void {
-    this.fsyncTimer = setInterval(() => {
-      this.fileHandlePool.fsyncDirty().catch((err: Error) => {
-        console.error(`[FileBackedStreamStore] Fsync error:`, err)
-      })
-    }, this.fsyncIntervalMs)
   }
 
   /**
@@ -381,15 +322,10 @@ export class FileBackedStreamStore {
   }
 
   /**
-   * Close the store, flushing all data and closing resources.
+   * Close the store, closing all file handles and database.
+   * All data is already fsynced on each append, so no final flush needed.
    */
   async close(): Promise<void> {
-    if (this.fsyncTimer) {
-      clearInterval(this.fsyncTimer)
-      this.fsyncTimer = null
-    }
-
-    await this.fileHandlePool.fsyncDirty()
     await this.fileHandlePool.closeAll()
     await this.db.close()
   }
@@ -398,7 +334,7 @@ export class FileBackedStreamStore {
   // StreamStore interface methods (to be implemented)
   // ============================================================================
 
-  create(
+  async create(
     streamPath: string,
     options: {
       contentType?: string
@@ -406,7 +342,7 @@ export class FileBackedStreamStore {
       expiresAt?: string
       initialData?: Uint8Array
     } = {}
-  ): Stream {
+  ): Promise<Stream> {
     const key = `stream:${streamPath}`
     const existing = this.db.get(key) as StreamMetadata | undefined
 
@@ -470,7 +406,7 @@ export class FileBackedStreamStore {
 
     // Append initial data if provided
     if (options.initialData && options.initialData.length > 0) {
-      this.append(streamPath, options.initialData)
+      await this.append(streamPath, options.initialData)
       // Re-fetch updated metadata
       const updated = this.db.get(key) as StreamMetadata
       return this.streamMetaToStream(updated)
@@ -533,11 +469,11 @@ export class FileBackedStreamStore {
     return true
   }
 
-  append(
+  async append(
     streamPath: string,
     data: Uint8Array,
     options: { seq?: string; contentType?: string } = {}
-  ): StreamMessage {
+  ): Promise<StreamMessage> {
     const key = `stream:${streamPath}`
     const streamMeta = this.db.get(key) as StreamMetadata | undefined
 
@@ -588,17 +524,30 @@ export class FileBackedStreamStore {
     // Get write stream from pool
     const stream = this.fileHandlePool.getWriteStream(segmentPath)
 
-    // Write message with framing: [4 bytes length][data][\n]
+    // 1. Write message with framing: [4 bytes length][data][\n]
     const lengthBuf = Buffer.allocUnsafe(4)
     lengthBuf.writeUInt32BE(data.length, 0)
     stream.write(lengthBuf)
     stream.write(data)
     stream.write(`\n`)
 
-    // Mark as dirty (needs fsync)
-    this.fileHandlePool.markDirty(segmentPath)
+    // 2. Create message and add to in-memory buffer for read-your-writes consistency
+    const message: StreamMessage = {
+      data,
+      offset: newOffset,
+      timestamp: Date.now(),
+    }
+    const buffer = this.messageBuffers.get(streamPath) ?? []
+    buffer.push(message)
+    this.messageBuffers.set(streamPath, buffer)
 
-    // Update LMDB metadata
+    // 3. Notify long-polls (minimize their latency - they read from buffer + disk)
+    this.notifyLongPolls(streamPath)
+
+    // 4. Flush to disk (blocks here until durable)
+    await this.fileHandlePool.fsyncFile(segmentPath)
+
+    // 5. Update LMDB metadata (only after flush, so metadata reflects durability)
     const updatedMeta: StreamMetadata = {
       ...streamMeta,
       currentOffset: newOffset,
@@ -607,21 +556,10 @@ export class FileBackedStreamStore {
     }
     this.db.putSync(key, updatedMeta)
 
-    // Create message
-    const message: StreamMessage = {
-      data,
-      offset: newOffset,
-      timestamp: Date.now(),
-    }
+    // 6. Clear from buffer (data is now durable on disk)
+    this.messageBuffers.delete(streamPath)
 
-    // Add to in-memory buffer for read-your-writes consistency
-    const buffer = this.messageBuffers.get(streamPath) ?? []
-    buffer.push(message)
-    this.messageBuffers.set(streamPath, buffer)
-
-    // Notify long-polls (they'll read from buffer + disk)
-    this.notifyLongPolls(streamPath)
-
+    // 7. Return (client knows data is durable)
     return message
   }
 

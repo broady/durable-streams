@@ -250,12 +250,15 @@ export class DurableStreamTestServer {
 
     const isNew = !this.store.has(path)
 
-    this.store.create(path, {
-      contentType,
-      ttlSeconds,
-      expiresAt: expiresAtHeader,
-      initialData: body.length > 0 ? body : undefined,
-    })
+    // Support both sync (StreamStore) and async (FileBackedStreamStore) create
+    await Promise.resolve(
+      this.store.create(path, {
+        contentType,
+        ttlSeconds,
+        expiresAt: expiresAtHeader,
+        initialData: body.length > 0 ? body : undefined,
+      })
+    )
 
     const stream = this.store.get(path)!
 
@@ -406,7 +409,10 @@ export class DurableStreamTestServer {
       return
     }
 
-    const message = this.store.append(path, body, { seq, contentType })
+    // Support both sync (StreamStore) and async (FileBackedStreamStore) append
+    const message = await Promise.resolve(
+      this.store.append(path, body, { seq, contentType })
+    )
 
     res.writeHead(200, {
       [STREAM_OFFSET_HEADER]: message.offset,
