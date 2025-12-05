@@ -37,7 +37,7 @@ The protocol provides:
 
 This monorepo contains:
 
-- **[@durable-streams/client](./packages/client)** - TypeScript read-only client (smaller bundle for read-heavy applications)
+- **[@durable-streams/client](./packages/client)** - TypeScript read-only client (smaller bundle)
 - **[@durable-streams/writer](./packages/writer)** - TypeScript read/write client (includes create/append/delete operations)
 - **[@durable-streams/server](./packages/server)** - Node.js reference server implementation
 - **[@durable-streams/cli](./packages/cli)** - Command-line tool
