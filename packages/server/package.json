@@ -18,6 +18,9 @@
     "dev": "tsdown --watch",
     "typecheck": "tsc --noEmit"
   },
+  "dependencies": {
+    "lmdb": "^3.3.0"
+  },
   "devDependencies": {
     "tsdown": "^0.9.0",
     "typescript": "^5.0.0"
