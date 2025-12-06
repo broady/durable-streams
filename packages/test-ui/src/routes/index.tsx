@@ -66,28 +66,34 @@ function Index() {
         return
       }
 
-      const result = await registryStream.read({ offset: '-1' }).catch(() => null)
+      // Read all chunks from the registry
       const loadedStreams: Stream[] = []
 
-      if (result && result.data.length > 0) {
-        const text = new TextDecoder().decode(result.data)
-        const lines = text.trim().split('\n').filter(Boolean)
+      try {
+        for await (const chunk of registryStream.read({ offset: '-1' })) {
+          if (chunk.data.length > 0) {
+            const text = new TextDecoder().decode(chunk.data)
+            const lines = text.trim().split('\n').filter(Boolean)
 
-        for (const line of lines) {
-          try {
-            const event = JSON.parse(line)
-            if (event.type === 'created') {
-              loadedStreams.push({ path: event.path, contentType: event.contentType })
-            } else if (event.type === 'deleted') {
-              const index = loadedStreams.findIndex((s) => s.path === event.path)
-              if (index !== -1) {
-                loadedStreams.splice(index, 1)
+            for (const line of lines) {
+              try {
+                const event = JSON.parse(line)
+                if (event.type === 'created') {
+                  loadedStreams.push({ path: event.path, contentType: event.contentType })
+                } else if (event.type === 'deleted') {
+                  const index = loadedStreams.findIndex((s) => s.path === event.path)
+                  if (index !== -1) {
+                    loadedStreams.splice(index, 1)
+                  }
+                }
+              } catch {
+                // Ignore malformed JSON lines
               }
             }
-          } catch {
-            // Ignore malformed JSON lines
           }
         }
+      } catch (readErr) {
+        console.error('Error reading registry stream:', readErr)
       }
 
       setStreams(loadedStreams)
