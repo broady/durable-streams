@@ -5,12 +5,14 @@ This document outlines testing approaches for Durable Streams server implementat
 ## Overview
 
 The conformance test suite (`@durable-streams/conformance-tests`) validates:
+
 - ✅ HTTP protocol compliance
 - ✅ Correct header handling
 - ✅ Offset and sequence number behavior
 - ✅ Observable invariants (monotonicity, byte-exactness, etc.)
 
 Implementation tests should validate:
+
 - ⚠️ Internal state consistency
 - ⚠️ Crash recovery and durability
 - ⚠️ Race conditions and concurrency
@@ -30,7 +32,7 @@ Based on 1.5 years of production experience with [ElectricSQL](https://electric-
 #### Test: Incomplete Write Recovery
 
 ```typescript
-test('should recover from incomplete chunk write', async () => {
+test("should recover from incomplete chunk write", async () => {
   const storage = new YourStorage()
 
   // Append some data
@@ -38,8 +40,8 @@ test('should recover from incomplete chunk write', async () => {
 
   // Simulate crash by manually corrupting storage
   const chunkFile = storage.getChunkPath(streamId, offset)
-  const fd = fs.openSync(chunkFile, 'a')
-  fs.writeSync(fd, Buffer.from([0xFF, 0xFF])) // Partial data
+  const fd = fs.openSync(chunkFile, "a")
+  fs.writeSync(fd, Buffer.from([0xff, 0xff])) // Partial data
   fs.closeSync(fd)
 
   // Initialize new storage instance (simulates restart)
@@ -57,7 +59,7 @@ test('should recover from incomplete chunk write', async () => {
 #### Test: Idempotent Recovery
 
 ```typescript
-test('should handle recovery idempotently', async () => {
+test("should handle recovery idempotently", async () => {
   const storage = new YourStorage()
 
   // Append data
@@ -79,7 +81,7 @@ test('should handle recovery idempotently', async () => {
 #### Test: Partial Flush Handling
 
 ```typescript
-test('should handle partial flush to disk', async () => {
+test("should handle partial flush to disk", async () => {
   const storage = new YourStorage()
 
   // Write multiple chunks
@@ -110,7 +112,7 @@ test('should handle partial flush to disk', async () => {
 #### Test: Concurrent Readers During Write
 
 ```typescript
-test('should serve consistent data to concurrent readers during write', async () => {
+test("should serve consistent data to concurrent readers during write", async () => {
   const storage = new YourStorage()
 
   // Start slow append in background
@@ -129,7 +131,7 @@ test('should serve consistent data to concurrent readers during write', async ()
   // All readers should see consistent state
   // Either empty (append not visible) OR complete chunk (append done)
   // NEVER partial data
-  readResults.forEach(result => {
+  readResults.forEach((result) => {
     expect([0, largeChunk.length]).toContain(result.data.length)
   })
 })
@@ -140,7 +142,7 @@ test('should serve consistent data to concurrent readers during write', async ()
 #### Test: File Deletion During Read
 
 ```typescript
-test('should handle file deletion during active read stream', async () => {
+test("should handle file deletion during active read stream", async () => {
   const storage = new YourStorage()
 
   await storage.append(streamId, chunk1)
@@ -167,7 +169,7 @@ test('should handle file deletion during active read stream', async () => {
 #### Test: LSN/Offset Persistence Races
 
 ```typescript
-test('should persist offsets atomically', async () => {
+test("should persist offsets atomically", async () => {
   const storage = new YourStorage()
 
   // Concurrent appends
@@ -179,7 +181,7 @@ test('should persist offsets atomically', async () => {
   const offsets = await Promise.all(promises)
 
   // All offsets should be unique and monotonic
-  const uniqueOffsets = new Set(offsets.map(o => o.toString()))
+  const uniqueOffsets = new Set(offsets.map((o) => o.toString()))
   expect(uniqueOffsets.size).toBe(100)
 
   // Verify offsets are actually persisted correctly
@@ -202,7 +204,7 @@ test('should persist offsets atomically', async () => {
 #### Test: No File Handle Leaks
 
 ```typescript
-test('should not leak file handles', async () => {
+test("should not leak file handles", async () => {
   const storage = new YourStorage()
   const initialHandles = process._getActiveHandles().length
 
@@ -217,7 +219,7 @@ test('should not leak file handles', async () => {
 
   // Force garbage collection
   if (global.gc) global.gc()
-  await new Promise(resolve => setTimeout(resolve, 100))
+  await new Promise((resolve) => setTimeout(resolve, 100))
 
   const finalHandles = process._getActiveHandles().length
   expect(finalHandles).toBeLessThanOrEqual(initialHandles + 5)
@@ -229,7 +231,7 @@ test('should not leak file handles', async () => {
 #### Test: Complete Cleanup on Delete
 
 ```typescript
-test('should completely remove all files on delete', async () => {
+test("should completely remove all files on delete", async () => {
   const storage = new YourStorage()
 
   await storage.create(streamId)
@@ -244,7 +246,7 @@ test('should completely remove all files on delete', async () => {
   await storage.delete(streamId)
 
   // Verify ALL files removed
-  files.forEach(file => {
+  files.forEach((file) => {
     expect(fs.existsSync(file)).toBe(false)
   })
 
@@ -258,7 +260,7 @@ test('should completely remove all files on delete', async () => {
 #### Test: LRU Eviction
 
 ```typescript
-test('should evict inactive streams when memory pressure', async () => {
+test("should evict inactive streams when memory pressure", async () => {
   const storage = new YourStorage({ maxMemoryMB: 100 })
 
   // Create many streams to exceed memory limit
@@ -291,11 +293,11 @@ test('should evict inactive streams when memory pressure', async () => {
 
 ```typescript
 describe.each([
-  ['InMemoryStorage', InMemoryStorage],
-  ['FileStorage', FileStorage],
-  ['R2Storage', R2Storage],
-])('%s compliance', (name, StorageClass) => {
-  test('append and read', async () => {
+  ["InMemoryStorage", InMemoryStorage],
+  ["FileStorage", FileStorage],
+  ["R2Storage", R2Storage],
+])("%s compliance", (name, StorageClass) => {
+  test("append and read", async () => {
     const storage = new StorageClass()
     await storage.create(streamId)
     await storage.append(streamId, chunk1)
@@ -304,7 +306,7 @@ describe.each([
     expect(result.data).toEqual(chunk1)
   })
 
-  test('offset generation', async () => {
+  test("offset generation", async () => {
     const storage = new StorageClass()
     await storage.create(streamId)
 
@@ -323,7 +325,7 @@ describe.each([
 #### Test: Migration Between Backends
 
 ```typescript
-test('should migrate data between storage backends', async () => {
+test("should migrate data between storage backends", async () => {
   const fileStorage = new FileStorage()
   await fileStorage.create(streamId)
   await fileStorage.append(streamId, chunk1)
@@ -352,7 +354,7 @@ test('should migrate data between storage backends', async () => {
 #### Test: Startup Synchronization
 
 ```typescript
-test('should not process writes before full initialization', async () => {
+test("should not process writes before full initialization", async () => {
   const storage = new YourStorage()
 
   // Simulate slow initialization
@@ -384,16 +386,22 @@ test('should not process writes before full initialization', async () => {
 #### Test: Random Operation Sequences
 
 ```typescript
-import fc from 'fast-check'
+import fc from "fast-check"
 
-test('maintains invariants across random operations', async () => {
+test("maintains invariants across random operations", async () => {
   await fc.assert(
     fc.asyncProperty(
-      fc.array(fc.oneof(
-        fc.record({ op: fc.constant('append'), data: fc.uint8Array({ maxLength: 1000 }) }),
-        fc.record({ op: fc.constant('read'), offset: fc.string() }),
-        fc.record({ op: fc.constant('delete') }),
-      ), { maxLength: 100 }),
+      fc.array(
+        fc.oneof(
+          fc.record({
+            op: fc.constant("append"),
+            data: fc.uint8Array({ maxLength: 1000 }),
+          }),
+          fc.record({ op: fc.constant("read"), offset: fc.string() }),
+          fc.record({ op: fc.constant("delete") })
+        ),
+        { maxLength: 100 }
+      ),
       async (operations) => {
         const storage = new YourStorage()
         await storage.create(streamId)
@@ -401,14 +409,14 @@ test('maintains invariants across random operations', async () => {
         const expectedData = []
 
         for (const op of operations) {
-          if (op.op === 'append') {
+          if (op.op === "append") {
             await storage.append(streamId, op.data)
             expectedData.push(...op.data)
-          } else if (op.op === 'read') {
+          } else if (op.op === "read") {
             const result = await storage.read(streamId, 0)
             // Should never crash, always return valid data
             expect(result.data).toBeDefined()
-          } else if (op.op === 'delete') {
+          } else if (op.op === "delete") {
             await storage.delete(streamId)
             expectedData.length = 0
             await storage.create(streamId) // Recreate for next ops
@@ -430,7 +438,7 @@ test('maintains invariants across random operations', async () => {
 #### Test: Offset Wraparound
 
 ```typescript
-test('handles offset wraparound correctly', async () => {
+test("handles offset wraparound correctly", async () => {
   const storage = new YourStorage()
 
   // If using numeric offsets, test near MAX_SAFE_INTEGER
@@ -446,7 +454,7 @@ test('handles offset wraparound correctly', async () => {
   // Should still maintain monotonicity (wrapping or error)
   const allOffsets = await storage.listOffsets(streamId)
   for (let i = 1; i < allOffsets.length; i++) {
-    expect(compareOffsets(allOffsets[i], allOffsets[i-1])).toBeGreaterThan(0)
+    expect(compareOffsets(allOffsets[i], allOffsets[i - 1])).toBeGreaterThan(0)
   }
 })
 ```
@@ -467,10 +475,10 @@ class ChaoticStorage {
 
   async append(streamId, data) {
     if (Math.random() < this.failureRate) {
-      throw new Error('Simulated failure')
+      throw new Error("Simulated failure")
     }
     if (this.delayMs > 0) {
-      await new Promise(r => setTimeout(r, this.delayMs))
+      await new Promise((r) => setTimeout(r, this.delayMs))
     }
     return this.storage.append(streamId, data)
   }
@@ -478,10 +486,10 @@ class ChaoticStorage {
   // ... wrap all methods with chaos injection
 }
 
-test('handles transient failures gracefully', async () => {
+test("handles transient failures gracefully", async () => {
   const chaoticStorage = new ChaoticStorage(new FileStorage(), {
     failureRate: 0.3,
-    delayMs: 100
+    delayMs: 100,
   })
 
   // Should retry and eventually succeed
@@ -503,25 +511,29 @@ test('handles transient failures gracefully', async () => {
 
 ```typescript
 function corruptFile(path, options = {}) {
-  const { position = 'end', bytes = 2 } = options
-  const fd = fs.openSync(path, 'r+')
+  const { position = "end", bytes = 2 } = options
+  const fd = fs.openSync(path, "r+")
   const stat = fs.fstatSync(fd)
 
-  const pos = position === 'end' ? stat.size :
-              position === 'middle' ? Math.floor(stat.size / 2) : 0
+  const pos =
+    position === "end"
+      ? stat.size
+      : position === "middle"
+        ? Math.floor(stat.size / 2)
+        : 0
 
-  fs.writeSync(fd, Buffer.alloc(bytes, 0xFF), 0, bytes, pos)
+  fs.writeSync(fd, Buffer.alloc(bytes, 0xff), 0, bytes, pos)
   fs.closeSync(fd)
 }
 
-test('recovers from corrupted chunk file', async () => {
+test("recovers from corrupted chunk file", async () => {
   const storage = new FileStorage()
   await storage.append(streamId, chunk1)
   await storage.append(streamId, chunk2)
 
   // Corrupt second chunk
   const chunkFile = storage.getChunkPath(streamId, offset2)
-  corruptFile(chunkFile, { position: 'middle', bytes: 10 })
+  corruptFile(chunkFile, { position: "middle", bytes: 10 })
 
   // Restart storage
   const storage2 = new FileStorage()
