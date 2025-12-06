@@ -6,7 +6,7 @@ import { createServer } from "node:http"
 import { StreamStore } from "./store"
 import { FileBackedStreamStore } from "./file-store"
 import type { IncomingMessage, Server, ServerResponse } from "node:http"
-import type { TestServerOptions } from "./types"
+import type { TestServerOptions, StreamLifecycleEvent } from "./types"
 
 // Protocol headers (aligned with PROTOCOL.md)
 const STREAM_OFFSET_HEADER = `Stream-Next-Offset`
@@ -28,8 +28,10 @@ const CURSOR_QUERY_PARAM = `cursor`
 export class DurableStreamTestServer {
   readonly store: StreamStore | FileBackedStreamStore
   private server: Server | null = null
-  private options: Required<Omit<TestServerOptions, `dataDir`>> & {
+  private options: Required<Omit<TestServerOptions, `dataDir` | `onStreamCreated` | `onStreamDeleted`>> & {
     dataDir?: string
+    onStreamCreated?: (event: StreamLifecycleEvent) => void | Promise<void>
+    onStreamDeleted?: (event: StreamLifecycleEvent) => void | Promise<void>
   }
   private _url: string | null = null
 
@@ -48,6 +50,8 @@ export class DurableStreamTestServer {
       host: options.host ?? `127.0.0.1`,
       longPollTimeout: options.longPollTimeout ?? 30_000,
       dataDir: options.dataDir,
+      onStreamCreated: options.onStreamCreated,
+      onStreamDeleted: options.onStreamDeleted,
     }
   }
 
@@ -181,7 +185,7 @@ export class DurableStreamTestServer {
           await this.handleAppend(path, req, res)
           break
         case `DELETE`:
-          this.handleDelete(path, res)
+          await this.handleDelete(path, res)
           break
         default:
           res.writeHead(405, { "content-type": `text/plain` })
@@ -290,6 +294,18 @@ export class DurableStreamTestServer {
     )
 
     const stream = this.store.get(path)!
+
+    // Call lifecycle hook for new streams
+    if (isNew && this.options.onStreamCreated) {
+      await Promise.resolve(
+        this.options.onStreamCreated({
+          type: `created`,
+          path,
+          contentType,
+          timestamp: Date.now(),
+        })
+      )
+    }
 
     // Return 201 for new streams, 200 for idempotent creates
     const headers: Record<string, string> = {
@@ -484,7 +500,7 @@ export class DurableStreamTestServer {
   /**
    * Handle DELETE - delete stream
    */
-  private handleDelete(path: string, res: ServerResponse): void {
+  private async handleDelete(path: string, res: ServerResponse): Promise<void> {
     if (!this.store.has(path)) {
       res.writeHead(404, { "content-type": `text/plain` })
       res.end(`Stream not found`)
@@ -492,6 +508,18 @@ export class DurableStreamTestServer {
     }
 
     this.store.delete(path)
+
+    // Call lifecycle hook
+    if (this.options.onStreamDeleted) {
+      await Promise.resolve(
+        this.options.onStreamDeleted({
+          type: `deleted`,
+          path,
+          timestamp: Date.now(),
+        })
+      )
+    }
+
     res.writeHead(204)
     res.end()
   }
