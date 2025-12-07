@@ -1,5 +1,5 @@
-import { createFileRoute } from '@tanstack/react-router'
-import { useState, useEffect, useRef } from 'react'
+import { createFileRoute, Link, Outlet } from '@tanstack/react-router'
+import { useState, useEffect } from 'react'
 import { DurableStream } from '@durable-streams/writer'
 import '../styles.css'
 
@@ -14,39 +14,15 @@ interface Stream {
 
 function Index() {
   const [streams, setStreams] = useState<Stream[]>([])
-  const [selectedStream, setSelectedStream] = useState<string | null>(null)
   const [newStreamPath, setNewStreamPath] = useState('')
   const [newStreamContentType, setNewStreamContentType] = useState('text/plain')
-  const [messages, setMessages] = useState<{ offset: string; data: string }[]>([])
-  const [writeInput, setWriteInput] = useState('')
   const [error, setError] = useState<string | null>(null)
-  const [isFollowing, setIsFollowing] = useState(false)
-  const messagesEndRef = useRef<HTMLDivElement>(null)
-  const abortControllerRef = useRef<AbortController | null>(null)
 
   const SERVER_URL = 'http://localhost:8787'
 
   useEffect(() => {
     void loadStreamsFromRegistry()
   }, [])
-
-  useEffect(() => {
-    if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' })
-    }
-  }, [messages])
-
-  useEffect(() => {
-    if (selectedStream && !isFollowing) {
-      void startFollowing(selectedStream)
-    }
-    return () => {
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort()
-        abortControllerRef.current = null
-      }
-    }
-  }, [selectedStream])
 
   const loadStreamsFromRegistry = async () => {
     try {
@@ -142,54 +118,6 @@ function Index() {
     }
   }
 
-  const startFollowing = async (path: string) => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort()
-    }
-
-    const controller = new AbortController()
-    abortControllerRef.current = controller
-
-    setIsFollowing(true)
-    setMessages([])
-    setError(null)
-
-    try {
-      const stream = new DurableStream({
-        url: `${SERVER_URL}/v1/stream/${path}`,
-      })
-
-      for await (const chunk of stream.read({ signal: controller.signal })) {
-        const text = new TextDecoder().decode(chunk.data)
-        console.log(`new test`, text)
-        setMessages((prev) => [...prev, { offset: chunk.offset, data: text }])
-      }
-    } catch (err: any) {
-      console.log(err)
-      if (err.name !== 'AbortError') {
-        setError(`Failed to read stream: ${err.message}`)
-      }
-    } finally {
-      console.log(`exiting reading`)
-      setIsFollowing(false)
-    }
-  }
-
-  const writeToStream = async () => {
-    if (!selectedStream || !writeInput.trim()) return
-
-    try {
-      setError(null)
-      const stream = new DurableStream({
-        url: `${SERVER_URL}/v1/stream/${selectedStream}`,
-      })
-      await stream.append(writeInput + '\n')
-      setWriteInput('')
-    } catch (err: any) {
-      setError(`Failed to write to stream: ${err.message}`)
-    }
-  }
-
   return (
     <div className="container">
       <div className="sidebar">
@@ -200,7 +128,7 @@ function Index() {
             placeholder="Stream path"
             value={newStreamPath}
             onChange={(e) => setNewStreamPath(e.target.value)}
-            onKeyPress={(e) => e.key === 'Enter' && createStream()}
+            onKeyPress={(e) => e.key === 'Enter' && void createStream()}
           />
           <select
             value={newStreamContentType}
@@ -214,61 +142,35 @@ function Index() {
         </div>
         <div className="stream-list">
           {streams.map((stream) => (
-            <div
+            <Link
               key={stream.path}
-              className={`stream-item ${selectedStream === stream.path ? 'active' : ''}`}
+              to="/stream/$streamPath"
+              params={{ streamPath: stream.path }}
+              className="stream-item"
+              activeProps={{ className: 'stream-item active' }}
             >
-              <div onClick={() => setSelectedStream(stream.path)}>
+              <div>
                 <div className="stream-path">{stream.path}</div>
                 <div className="stream-type">{stream.contentType || 'unknown'}</div>
               </div>
               <button
                 className="delete-btn"
                 onClick={(e) => {
+                  e.preventDefault()
                   e.stopPropagation()
-                  deleteStream(stream.path)
+                  void deleteStream(stream.path)
                 }}
               >
                 ×
               </button>
-            </div>
+            </Link>
           ))}
         </div>
       </div>
       <div className="main">
         {error && <div className="error">{error}</div>}
-        {selectedStream ? (
-          <>
-            <div className="header">
-              <h2>{selectedStream}</h2>
-              <span className="status">{isFollowing ? 'Following' : 'Disconnected'}</span>
-            </div>
-            <div className="messages">
-              {messages.map((msg, i) => (
-                <div key={i} className="message">
-                  <pre>{msg.data}</pre>
-                </div>
-              ))}
-              <div ref={messagesEndRef} />
-            </div>
-            <div className="write-section">
-              <textarea
-                placeholder="Write message..."
-                value={writeInput}
-                onChange={(e) => setWriteInput(e.target.value)}
-                onKeyPress={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault()
-                    writeToStream()
-                  }
-                }}
-              />
-              <button onClick={writeToStream}>Send</button>
-            </div>
-          </>
-        ) : (
-          <div className="placeholder">Select a stream to start</div>
-        )}
+        <Outlet />
+        <div className="placeholder">Select a stream to start</div>
       </div>
     </div>
   )

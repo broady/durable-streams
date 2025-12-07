@@ -83,6 +83,8 @@ body {
   border-radius: 6px;
   cursor: pointer;
   transition: background 0.2s;
+  text-decoration: none;
+  color: inherit;
 }
 
 .stream-item:hover {
