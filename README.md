@@ -49,11 +49,9 @@ This monorepo contains:
 
 ![Durable Streams Test UI](https://github.com/user-attachments/assets/test-ui-screenshot.png)
 
-The fastest way to experience Durable Streams is to run the local server with either the **visual Test UI** or the **command-line CLI**:
+Run the local server and use either the web-based Test UI or the command-line CLI:
 
-### Option 1: Visual Test UI (Recommended)
-
-Start the server and open the web-based testing interface:
+### Option 1: Test UI
 
 ```bash
 # Clone and install
@@ -69,19 +67,17 @@ cd packages/test-ui
 pnpm dev
 ```
 
-Open `http://localhost:3000` in your browser to access the warm, friendly interface where you can:
+Open `http://localhost:3000` to:
 
-- **Create and manage streams** with different content types (text/plain, application/json, binary)
-- **Write messages** using an intuitive textarea with keyboard shortcuts
-- **Watch real-time updates** as messages flow through your streams
-- **Monitor the stream registry** to see all active streams across CLI and UI clients
-- **Explore stream metadata** and content-type aware rendering
+- Create and manage streams with different content types (text/plain, application/json, binary)
+- Write messages with keyboard shortcuts
+- Monitor real-time stream updates
+- View the stream registry to see all active streams
+- Inspect stream metadata and content-type rendering
 
-The Test UI provides a cozy, visual way to understand how Durable Streams works. See the [Test UI README](./packages/test-ui/README.md) for more details.
+See the [Test UI README](./packages/test-ui/README.md) for details.
 
-### Option 2: Command-Line CLI
-
-For terminal enthusiasts, use the CLI for quick scripting and integration:
+### Option 2: CLI
 
 ```bash
 # Clone and install
@@ -110,9 +106,9 @@ durable-stream-dev write my-stream "More data..."
 echo "Piped content!" | durable-stream-dev write my-stream
 ```
 
-The CLI is perfect for shell scripts, automation, and piping data. See the [CLI README](./packages/cli/README.md) for more details.
+See the [CLI README](./packages/cli/README.md) for details.
 
-**Try both!** The Test UI and CLI work together seamlessly—streams created in one are immediately visible in the other via the `__registry__` system stream.
+The Test UI and CLI share the same `__registry__` system stream, so streams created in one are visible in the other.
 
 ## Quick Start
 

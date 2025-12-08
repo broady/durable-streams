@@ -2,16 +2,16 @@
 
 ![Durable Streams Test UI](https://github.com/user-attachments/assets/test-ui-screenshot.png)
 
-A warm, approachable web interface for testing the Durable Streams protocol. Create, monitor, and interact with durable streams through an intuitive visual interface.
+A web interface for testing the Durable Streams protocol. Create, monitor, and interact with durable streams through a visual interface.
 
 ## Features
 
 - **Stream Management**: Create and delete streams with different content types (text/plain, application/json, binary)
 - **Real-Time Monitoring**: Live stream following with automatic catchup and reconnection
-- **Interactive Writing**: Send messages to streams with a simple, friendly interface
-- **Smart Display**: Automatically renders messages based on content type (continuous text vs. structured JSON)
+- **Interactive Writing**: Send messages to streams with keyboard shortcuts
+- **Content-Type Rendering**: Automatically renders messages based on content type (continuous text vs. structured JSON)
 - **Stream Registry**: Automatic discovery of all streams via the `__registry__` system stream
-- **Warm Workshop Design**: Cozy, human-centered aesthetic with terracotta and sage accents
+- **Responsive Design**: Works on desktop and mobile devices
 
 ## Quick Start
 
@@ -62,13 +62,12 @@ The UI uses the `stream.follow()` API which automatically:
 ### UI Components
 
 - **Left Sidebar**:
-  - Warm terracotta header with "Durable Streams" branding
   - Create stream form with path input and content-type selector
-  - List of all active streams with visual indicators
-  - Delete buttons with confirmation dialogs for safety
+  - List of all active streams
+  - Delete buttons with confirmation dialogs
 - **Main Panel**:
   - Stream title header
-  - Smart message display (continuous for text/plain, cards for application/json)
+  - Message display (continuous for text/plain, cards for application/json)
   - Real-time updates as new messages arrive
 - **Write Section**:
   - Multi-line textarea for composing messages
@@ -92,7 +91,7 @@ packages/test-ui/
 │   ├── routes/
 │   │   ├── __root.tsx      # Root layout with router devtools
 │   │   └── index.tsx        # Main stream testing interface
-│   ├── styles.css           # Warm Workshop theme styles
+│   ├── styles.css           # UI styles
 │   ├── main.tsx             # App entry point
 │   └── routeTree.gen.ts     # Generated route tree
 ├── index.html
