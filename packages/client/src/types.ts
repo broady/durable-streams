@@ -217,8 +217,10 @@ export interface HeadResult {
 export interface ReadResult {
   /**
    * The data read from the stream.
+   * - For JSON-mode streams (application/json): parsed JSON array
+   * - For other streams: raw bytes (Uint8Array)
    */
-  data: Uint8Array
+  data: Uint8Array | Array<unknown>
 
   /**
    * Next offset to read from.

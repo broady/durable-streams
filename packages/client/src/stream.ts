@@ -733,25 +733,6 @@ export class DurableStream {
   }
 
   /**
-   * Convenience: interpret data as JSON messages.
-   * Parses each chunk's data as JSON and yields the parsed values.
-   */
-  async *json<T = unknown>(opts?: ReadOptions): AsyncIterable<T> {
-    const decoder = new TextDecoder()
-
-    for await (const chunk of this.read(opts)) {
-      if (chunk.data.length > 0) {
-        const text = decoder.decode(chunk.data)
-        // Handle potential newline-delimited JSON
-        const lines = text.split(`\n`).filter((l) => l.trim())
-        for (const line of lines) {
-          yield JSON.parse(line) as T
-        }
-      }
-    }
-  }
-
-  /**
    * Convenience: interpret data as text (UTF-8).
    */
   async *text(
@@ -844,7 +825,6 @@ export class DurableStream {
    * Parse a read response into a ReadResult.
    */
   async #parseReadResponse(response: Response): Promise<ReadResult> {
-    const data = new Uint8Array(await response.arrayBuffer())
     const offset = response.headers.get(STREAM_OFFSET_HEADER) ?? ``
     const cursor = response.headers.get(STREAM_CURSOR_HEADER) ?? undefined
     const upToDate = response.headers.has(STREAM_UP_TO_DATE_HEADER)
@@ -854,6 +834,14 @@ export class DurableStream {
     // Update instance contentType
     if (contentType && !this.contentType) {
       this.contentType = contentType
+    }
+
+    // Parse JSON for application/json content type
+    let data: Uint8Array | Array<unknown>
+    if (contentType?.startsWith(`application/json`)) {
+      data = await response.json()
+    } else {
+      data = new Uint8Array(await response.arrayBuffer())
     }
 
     return {

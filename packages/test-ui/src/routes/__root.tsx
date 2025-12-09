@@ -47,12 +47,10 @@ function RootLayout() {
       const loadedStreams: Array<Stream> = []
 
       try {
-        for await (const chunk of registryStream.json<
-          RegistryEvent | Array<RegistryEvent>
-        >()) {
-          const events = Array.isArray(chunk) ? chunk : [chunk]
+        for await (const chunk of registryStream.read()) {
+          const data = chunk.data as Array<RegistryEvent>
 
-          for (const event of events) {
+          for (const event of data) {
             if (event.type === `created`) {
               loadedStreams.push({
                 path: event.path,

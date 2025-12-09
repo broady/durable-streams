@@ -170,8 +170,8 @@ const stream = await DurableStream.create({
 })
 
 // Append data
-await stream.append(JSON.stringify({ event: "user.created", userId: "123" }))
-await stream.append(JSON.stringify({ event: "user.updated", userId: "123" }))
+await stream.append({ event: "user.created", userId: "123" })
+await stream.append({ event: "user.updated", userId: "123" })
 
 // Writer also includes all read operations
 const result = await stream.read({ live: false })
@@ -290,11 +290,14 @@ const stream = await DurableStream.create({
 await stream.append({ event: "user.created", userId: "123" })
 await stream.append({ event: "user.updated", userId: "123" })
 
-// Read returns parsed JSON array
-for await (const message of stream.json({ live: false })) {
-  console.log(message)
-  // { event: "user.created", userId: "123" }
-  // { event: "user.updated", userId: "123" }
+// Read returns chunks with parsed JSON arrays
+for await (const chunk of stream.read({ live: false })) {
+  const messages = chunk.data // Parsed JSON array
+  for (const message of messages) {
+    console.log(message)
+    // { event: "user.created", userId: "123" }
+    // { event: "user.updated", userId: "123" }
+  }
 }
 ```
 

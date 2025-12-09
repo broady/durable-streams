@@ -57,12 +57,22 @@ function StreamViewer() {
           live: `long-poll`,
           signal: controller.signal,
         })) {
-          const text = new TextDecoder().decode(chunk.data)
-          if (text !== ``) {
-            setMessages((prev) => [
-              ...prev,
-              { offset: chunk.offset, data: text },
-            ])
+          // Handle both Uint8Array and parsed JSON array
+          if (chunk.data instanceof Uint8Array) {
+            const text = new TextDecoder().decode(chunk.data)
+            if (text !== ``) {
+              setMessages((prev) => [
+                ...prev,
+                { offset: chunk.offset, data: text },
+              ])
+            }
+          } else {
+            // For JSON arrays, add each item individually
+            const newMessages = chunk.data.map((item) => ({
+              offset: chunk.offset,
+              data: JSON.stringify(item),
+            }))
+            setMessages((prev) => [...prev, ...newMessages])
           }
         }
       } catch (err: any) {
