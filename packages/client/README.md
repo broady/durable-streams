@@ -2,12 +2,6 @@
 
 TypeScript client for the Electric Durable Streams protocol.
 
-## Installation
-
-```bash
-npm install durable-stream
-```
-
 ## Overview
 
 The Durable Streams client exposes a single class: `DurableStream`.
