@@ -953,7 +953,7 @@ describe(`ReadableStream Conversion`, () => {
 
       expect(done).toBe(false)
       expect(value).toBeDefined()
-      expect(decode(value!)).toBe(`stream data`)
+      expect(decode(value)).toBe(`stream data`)
       expect(requestCount).toBeGreaterThanOrEqual(1)
 
       reader.releaseLock()
