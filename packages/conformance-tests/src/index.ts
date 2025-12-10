@@ -304,6 +304,7 @@ export function runConformanceTests(options: ConformanceTestOptions): void {
             }
           }
         } finally {
+          await reader.cancel()
           reader.releaseLock()
         }
       })()
