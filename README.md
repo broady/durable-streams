@@ -538,7 +538,7 @@ Stream database changes to web and mobile clients for real-time synchronization:
 ```typescript
 // Server: stream database changes
 for (const change of db.changes()) {
-  await stream.append(JSON.stringify(change))
+  await stream.append(change)
 }
 
 // Client: receive and apply changes (works in browsers, React Native, native apps)
