@@ -178,6 +178,12 @@ importers:
       '@durable-streams/writer':
         specifier: workspace:*
         version: link:../writer
+      '@standard-schema/spec':
+        specifier: ^1.0.0
+        version: 1.0.0
+      '@tanstack/db':
+        specifier: ^0.0.1-alpha.77
+        version: 0.0.1(typescript@5.9.3)
       tsdown:
         specifier: ^0.9.0
         version: 0.9.9(typescript@5.9.3)
@@ -455,6 +461,17 @@ packages:
   '@commitlint/types@20.2.0':
     resolution: {integrity: sha512-KTy0OqRDLR5y/zZMnizyx09z/rPlPC/zKhYgH8o/q6PuAjoQAKlRfY4zzv0M64yybQ//6//4H1n14pxaLZfUnA==}
     engines: {node: '>=v18'}
+
+  '@electric-sql/d2ts@0.1.8':
+    resolution: {integrity: sha512-2cyiDSaq5VxEHOQZ0yvknkdrVA44VADdDhNdeM3MIAVeati7gkiixKnX5osFaKvxM6SeLRKLQcaHSvlvdMDFRQ==}
+    peerDependencies:
+      '@electric-sql/client': '>=1.0.0-beta.4'
+      better-sqlite3: ^11.7.0
+    peerDependenciesMeta:
+      '@electric-sql/client':
+        optional: true
+      better-sqlite3:
+        optional: true
 
   '@emnapi/core@1.7.1':
     resolution: {integrity: sha512-o1uhUASyo921r2XtHYOHy7gdkGLge8ghBEQHMWmyJFoXlpU58kIrhhN3w26lpQb6dspetweapMn2CSNwQ8I4wg==}
@@ -1344,6 +1361,9 @@ packages:
   '@shikijs/vscode-textmate@10.0.2':
     resolution: {integrity: sha512-83yeghZ2xxin3Nj8z1NMd/NCuca+gsYXswywDy5bHvwlWL8tpTQmzGeUuHd9FC3E/SBEMvzJRwWEOz5gGes9Qg==}
 
+  '@standard-schema/spec@1.0.0':
+    resolution: {integrity: sha512-m2bOd0f2RT9k8QJx1JN85cZYyH1RqFBdlwtkSlf4tBDYLCiiZnv1fIIwacK6cqwXavOydf0NPToMQgpKq+dVlA==}
+
   '@stylistic/eslint-plugin@4.4.1':
     resolution: {integrity: sha512-CEigAk7eOLyHvdgmpZsKFwtiqS2wFwI1fn4j09IU9GmD4euFM4jEBAViWeCqaNLlbX2k2+A/Fq9cje4HQBXuJQ==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
@@ -1364,6 +1384,11 @@ packages:
     resolution: {integrity: sha512-zP1b6xd864AOOJQ7u6r+kicohRc8dAyql6sBbQh2f2RjoEynAfn0GrMHGeqhl1LN8JThokCkcjfGnXbPEz3q3A==}
     engines: {node: '>=18'}
     deprecated: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
+
+  '@tanstack/db@0.0.1':
+    resolution: {integrity: sha512-IPyH5VIL79gE97+M2yFFCfAHulG3kKEq8rOW8d2yVr769tsz7HFYlOqp6sIyuso2fbOAgQpe4PMO+CWfSV1bTg==}
+    peerDependencies:
+      typescript: '>=4.7'
 
   '@tanstack/eslint-config@0.3.3':
     resolution: {integrity: sha512-8VFyAaIFV9onJcfc5yVj5WWl6DmN3W4m+t0Mb+nZrQmqHy+kDndw5O5Xv2BHVWRRPTqnhlJYh6wHWGh0R81ZzQ==}
@@ -1458,6 +1483,9 @@ packages:
     resolution: {integrity: sha512-gobraqMjkR5OO4nNbnwursGo08Idla6Yu30RspIA9IR1hv4WPJlxIyRWJcKjiQeXGyu5TuekLPUOHM46oood7w==}
     engines: {node: '>=12'}
 
+  '@tanstack/store@0.7.7':
+    resolution: {integrity: sha512-xa6pTan1bcaqYDS9BDpSiS63qa6EoDkPN9RsRaxHuDdVDNntzq3xNwR5YKTU/V3SkSyC9T4YVOPh2zRQN0nhIQ==}
+
   '@tanstack/store@0.8.0':
     resolution: {integrity: sha512-Om+BO0YfMZe//X2z0uLF2j+75nQga6TpTJgLJQBiq85aOyZNIhkCgleNcud2KQg4k4v9Y9l+Uhru3qWMPGTOzQ==}
 
@@ -1508,6 +1536,9 @@ packages:
 
   '@types/json-schema@7.0.15':
     resolution: {integrity: sha512-5+fP8P8MFNC+AyZCDxrB2pkZFPGzqQWUzpSeuuVLvm8VMcorNYavBqoFcxK8bQz4Qsbn4oUEEem4wDLfcysGHA==}
+
+  '@types/murmurhash-js@1.0.6':
+    resolution: {integrity: sha512-P2RRwRpevEKO0FrK5xNjxBywg0Br24tEv8K2+iWg56PtcCUNGAkaaOWKBQiUpofA8H/gmgdHXrcvSgp2uXCVAQ==}
 
   '@types/node@12.20.55':
     resolution: {integrity: sha512-J8xLz7q2OFulZ2cyGTLE1TbbZcjpno7FaN6zdJNrgAdrJ+DZzh/uFR6YrTb4C+nXakvud8Q4+rbhoIWlYQbUFQ==}
@@ -2315,6 +2346,10 @@ packages:
     resolution: {integrity: sha512-gIXjKqtFuWEgzFRJA9WCQeSJLZDjgJUOMCMzxtvFq/37KojM1BFGufqsCy0r4qSQmYLsZYMeyRqzIWOMup03sw==}
     engines: {node: '>=14'}
 
+  fractional-indexing@3.2.0:
+    resolution: {integrity: sha512-PcOxmqwYCW7O2ovKRU8OoQQj2yqTfEB/yeTYk4gPid6dN5ODRfU1hXd9tTVZzax/0NkO7AxpHykvZnT1aYp/BQ==}
+    engines: {node: ^14.13.1 || >=16.0.0}
+
   fs-extra@7.0.1:
     resolution: {integrity: sha512-YJDaCJZEnBmcbw13fvdAM9AwNOJwOzrE4pqMqBq5nFiEqXUqHwlK4B+3pUw6JNvfSPtX05xFHtYy/1ni01eGCw==}
     engines: {node: '>=6 <7 || >=8'}
@@ -2792,6 +2827,9 @@ packages:
 
   muggle-string@0.4.1:
     resolution: {integrity: sha512-VNTrAak/KhO2i8dqqnqnAHOa3cYBwXEZe9h+D5h/1ZqFSTEFHdM65lR7RoIqq3tBBYavsOXV84NoHXZ0AkPyqQ==}
+
+  murmurhash-js@1.0.0:
+    resolution: {integrity: sha512-TvmkNhkv8yct0SVBSy+o8wYzXjE4Zz3PCesbfs8HiCXXdcTuocApFv11UWlNFWKYsP2okqrhb7JNlSm9InBhIw==}
 
   nanoid@3.3.11:
     resolution: {integrity: sha512-N8SpfPUnUp1bK+PMYW8qSWdl9U+wwNWI4QKxOYDy9JAro3WMX7p2OeVRF9v+347pnakNevPmiHhNmZ2HbFA76w==}
@@ -3968,6 +4006,12 @@ snapshots:
       '@types/conventional-commits-parser': 5.0.2
       chalk: 5.6.2
 
+  '@electric-sql/d2ts@0.1.8':
+    dependencies:
+      '@types/murmurhash-js': 1.0.6
+      fractional-indexing: 3.2.0
+      murmurhash-js: 1.0.0
+
   '@emnapi/core@1.7.1':
     dependencies:
       '@emnapi/wasi-threads': 1.1.0
@@ -4621,6 +4665,8 @@ snapshots:
 
   '@shikijs/vscode-textmate@10.0.2': {}
 
+  '@standard-schema/spec@1.0.0': {}
+
   '@stylistic/eslint-plugin@4.4.1(eslint@9.39.1(jiti@2.6.1))(typescript@5.9.3)':
     dependencies:
       '@typescript-eslint/utils': 8.49.0(eslint@9.39.1(jiti@2.6.1))(typescript@5.9.3)
@@ -4665,6 +4711,16 @@ snapshots:
       - supports-color
       - typescript
       - vite
+
+  '@tanstack/db@0.0.1(typescript@5.9.3)':
+    dependencies:
+      '@electric-sql/d2ts': 0.1.8
+      '@standard-schema/spec': 1.0.0
+      '@tanstack/store': 0.7.7
+      typescript: 5.9.3
+    transitivePeerDependencies:
+      - '@electric-sql/client'
+      - better-sqlite3
 
   '@tanstack/eslint-config@0.3.3(@typescript-eslint/utils@8.49.0(eslint@9.39.1(jiti@2.6.1))(typescript@5.9.3))(eslint@9.39.1(jiti@2.6.1))(typescript@5.9.3)':
     dependencies:
@@ -4805,6 +4861,8 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+  '@tanstack/store@0.7.7': {}
+
   '@tanstack/store@0.8.0': {}
 
   '@tanstack/typedoc-config@0.3.2(typescript@5.9.3)':
@@ -4876,6 +4934,8 @@ snapshots:
       '@types/unist': 3.0.3
 
   '@types/json-schema@7.0.15': {}
+
+  '@types/murmurhash-js@1.0.6': {}
 
   '@types/node@12.20.55': {}
 
@@ -5755,6 +5815,8 @@ snapshots:
       cross-spawn: 7.0.6
       signal-exit: 4.1.0
 
+  fractional-indexing@3.2.0: {}
+
   fs-extra@7.0.1:
     dependencies:
       graceful-fs: 4.2.11
@@ -6204,6 +6266,8 @@ snapshots:
       msgpackr-extract: 3.0.3
 
   muggle-string@0.4.1: {}
+
+  murmurhash-js@1.0.0: {}
 
   nanoid@3.3.11: {}
 
