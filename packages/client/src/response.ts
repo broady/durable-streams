@@ -339,32 +339,6 @@ export class StreamResponseImpl<
   bodyStream(): ReadableStream<Uint8Array> {
     this.#markConsuming()
 
-    // Optimization: If we have the first response and won't need more,
-    // just return the response body directly - zero copy!
-    if (this.upToDate && !this.#shouldContinueLive() && this.#firstResponse) {
-      const response = this.#takeFirstResponse()!
-      const body = response.body
-      if (body) {
-        // Wrap to handle cleanup on completion
-        const self = this
-        return body.pipeThrough(
-          new TransformStream<Uint8Array, Uint8Array>({
-            flush() {
-              self.#markClosed()
-            },
-          })
-        )
-      }
-      this.#markClosed()
-      return new ReadableStream<Uint8Array>({
-        start(controller) {
-          controller.close()
-        },
-      })
-    }
-
-    // Multiple responses case: use pipeTo with preventClose to concatenate
-    // This is more efficient than manual read/enqueue - the browser optimizes pipes
     const self = this
     const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>()
 
