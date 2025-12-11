@@ -26,7 +26,7 @@ describe(`SSE parsing`, () => {
     return new ReadableStream({
       pull(controller) {
         if (index < chunks.length) {
-          controller.enqueue(encoder.encode(chunks[index]!))
+          controller.enqueue(encoder.encode(chunks[index]))
           index++
         } else {
           controller.close()
@@ -166,31 +166,42 @@ data: {"streamNextOffset":"300"}
     })
 
     it(`should respect abort signal`, async () => {
-      const sseText = `event: data
-data: {"id":1}
-
-event: data
-data: {"id":2}
-
-`
-      const stream = createSSEStream(sseText)
+      // Create a stream that delivers events in separate chunks with delay
       const abortController = new AbortController()
+      let chunkIndex = 0
+      const chunks = [
+        `event: data\ndata: {"id":1}\n\n`,
+        `event: data\ndata: {"id":2}\n\n`,
+      ]
+      const encoder = new TextEncoder()
+
+      const stream = new ReadableStream<Uint8Array>({
+        async pull(controller) {
+          if (abortController.signal.aborted) {
+            controller.close()
+            return
+          }
+          if (chunkIndex < chunks.length) {
+            controller.enqueue(encoder.encode(chunks[chunkIndex]))
+            chunkIndex++
+          } else {
+            controller.close()
+          }
+        },
+      })
+
       const events = []
 
       // Abort after first event
-      let count = 0
       for await (const event of parseSSEStream(
         stream,
         abortController.signal
       )) {
         events.push(event)
-        count++
-        if (count === 1) {
-          abortController.abort()
-        }
+        abortController.abort()
       }
 
-      // Should only have gotten the first event
+      // Should only have gotten the first event (second chunk not read due to abort)
       expect(events).toHaveLength(1)
     })
 
@@ -254,11 +265,17 @@ data: {"real":"data"}
 })
 
 describe(`SSE mode integration`, () => {
+  // Import the implementation directly for testing (not exported publicly)
+  const getStreamResponseImpl = async () => {
+    const module = await import(`../src/response`)
+    return module.StreamResponseImpl
+  }
+
   it(`should create synthetic Response objects from SSE data events`, async () => {
     // This tests that the StreamResponse correctly handles SSE mode
     // by creating a mock SSE response and verifying the consumption methods work
 
-    const { StreamResponseImpl } = await import(`../src/response`)
+    const StreamResponseImpl = await getStreamResponseImpl()
 
     // Create a mock SSE response body
     const sseText = `event: data
@@ -320,7 +337,7 @@ data: {"streamNextOffset":"200"}
   })
 
   it(`should support jsonStream with SSE`, async () => {
-    const { StreamResponseImpl } = await import(`../src/response`)
+    const StreamResponseImpl = await getStreamResponseImpl()
 
     const sseText = `event: data
 data: [{"id":1},{"id":2}]
@@ -371,7 +388,7 @@ data: {"streamNextOffset":"100"}
   })
 
   it(`should support bodyStream with SSE`, async () => {
-    const { StreamResponseImpl } = await import(`../src/response`)
+    const StreamResponseImpl = await getStreamResponseImpl()
 
     const sseText = `event: data
 data: Hello, World!

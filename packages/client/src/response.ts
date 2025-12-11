@@ -167,7 +167,6 @@ export class StreamResponseImpl<
     let firstResponseYielded = false
     let sseEventIterator: AsyncGenerator<SSEEvent, void, undefined> | null =
       null
-    const pendingSSEData: Array<string> = []
 
     return new ReadableStream<Response>({
       pull: async (controller) => {
@@ -461,7 +460,7 @@ export class StreamResponseImpl<
       pull: async (controller) => {
         // Drain pending items first
         if (pendingItems.length > 0) {
-          controller.enqueue(pendingItems.shift()!)
+          controller.enqueue(pendingItems.shift())
           return
         }
 
@@ -479,7 +478,7 @@ export class StreamResponseImpl<
 
         // Enqueue first item
         if (pendingItems.length > 0) {
-          controller.enqueue(pendingItems.shift()!)
+          controller.enqueue(pendingItems.shift())
         }
       },
 

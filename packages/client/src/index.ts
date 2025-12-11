@@ -13,9 +13,6 @@
 // Standalone stream() function - the fetch-like read API
 export { stream } from "./stream-api"
 
-// StreamResponse implementation
-export { StreamResponseImpl } from "./response"
-
 // ============================================================================
 // Handle API (read/write)
 // ============================================================================
