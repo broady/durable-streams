@@ -1,0 +1,18 @@
+{
+  "name": "@durable-streams-internal/caddy-plugin",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Caddy plugin for Durable Streams",
+  "author": "Durable Stream contributors",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "build": "go build -o caddy",
+    "test": "go test ./...",
+    "conformance": "pnpm build && cd ../.. && vitest run packages/caddy-plugin/test/conformance.test.ts"
+  },
+  "devDependencies": {
+    "@durable-streams/conformance-tests": "workspace:*",
+    "vitest": "^3.2.4"
+  }
+}

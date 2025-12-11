@@ -28,6 +28,13 @@ export default defineConfig({
         },
         resolve: { alias },
       }),
+      defineProject({
+        test: {
+          name: "caddy",
+          include: ["packages/caddy-plugin/**/*.test.ts"],
+        },
+        resolve: { alias },
+      }),
     ],
     coverage: {
       provider: `v8`,
