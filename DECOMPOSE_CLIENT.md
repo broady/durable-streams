@@ -132,8 +132,8 @@ export interface StreamOptions {
   url: string | URL
 
   // Auth / transport
-  auth?: AuthOptions
-  headers?: HeadersInit
+  headers?: HeadersRecord
+  params?: ParamsRecord
   signal?: AbortSignal
 
   // Custom fetch implementation (for auth layers, proxies, etc.)
@@ -494,7 +494,8 @@ We replace `DurableStream` with `StreamHandle`.
 ```ts
 export interface StreamHandleOptions {
   url: string | URL
-  auth?: AuthOptions
+  headers?: HeadersRecord
+  params?: ParamsRecord
   contentType?: string
   onError?: OnErrorHandler
 }

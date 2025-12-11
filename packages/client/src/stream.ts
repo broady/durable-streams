@@ -62,7 +62,7 @@ export interface DurableStreamOptions extends StreamHandleOptions {
  * // Create a new stream
  * const stream = await DurableStream.create({
  *   url: "https://streams.example.com/my-stream",
- *   auth: { token: "my-token" },
+ *   headers: { Authorization: "Bearer my-token" },
  *   contentType: "application/json"
  * });
  *

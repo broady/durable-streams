@@ -352,19 +352,6 @@ export class DurableStream extends BaseStream {
     // Build headers
     const headers: Record<string, string> = {}
 
-    // Handle auth
-    if (this.options.auth) {
-      if (`token` in this.options.auth) {
-        const headerName = this.options.auth.headerName ?? `authorization`
-        headers[headerName] = `Bearer ${this.options.auth.token}`
-      } else if (`headers` in this.options.auth) {
-        Object.assign(headers, this.options.auth.headers)
-      } else if (`getHeaders` in this.options.auth) {
-        const authHeaders = await this.options.auth.getHeaders()
-        Object.assign(headers, authHeaders)
-      }
-    }
-
     // Merge constructor headers
     if (this.options.headers) {
       for (const [key, value] of Object.entries(this.options.headers)) {

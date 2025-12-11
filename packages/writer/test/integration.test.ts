@@ -707,14 +707,14 @@ describe(`Headers and Authentication`, () => {
       url: streamUrl,
       signal: aborter.signal,
       fetch: fetchWrapper,
-      auth: { token: `my-secret-token` },
+      headers: { Authorization: `Bearer my-secret-token` },
     })
 
     // stream() triggers fetch
     await stream.stream({ live: false, signal: aborter.signal })
 
     expect(capturedHeaders[0]).toMatchObject({
-      authorization: `Bearer my-secret-token`,
+      Authorization: `Bearer my-secret-token`,
     })
   })
 
