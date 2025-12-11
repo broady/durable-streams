@@ -186,25 +186,6 @@ export class StreamResponseImpl<
   }
 
   /**
-   * Parse JSON from text, handling arrays and newline-delimited JSON.
-   */
-  #parseJsonText<T>(text: string): Array<T> {
-    if (!text.trim()) return []
-    try {
-      const parsed = JSON.parse(text) as unknown
-      if (Array.isArray(parsed)) {
-        return parsed as Array<T>
-      } else {
-        return [parsed as T]
-      }
-    } catch {
-      // Try newline-delimited JSON
-      const lines = text.split(`\n`).filter((l) => l.trim())
-      return lines.map((line) => JSON.parse(line) as T)
-    }
-  }
-
-  /**
    * Async generator that yields Response objects (first response + live updates).
    * This is the core primitive for all consumption methods.
    */
@@ -323,11 +304,12 @@ export class StreamResponseImpl<
     const items: Array<TJson> = []
 
     for await (const response of this.#generateResponses()) {
-      // Use the efficient text() method on Response, then parse
-      const text = await response.text()
-      if (text.trim()) {
-        const parsed = this.#parseJsonText<TJson>(text)
+      // Use the efficient json() method on Response
+      const parsed = (await response.json()) as TJson | Array<TJson>
+      if (Array.isArray(parsed)) {
         items.push(...parsed)
+      } else {
+        items.push(parsed)
       }
       if (this.upToDate) break
     }
@@ -393,7 +375,7 @@ export class StreamResponseImpl<
             currentReader = body.getReader()
             // Read first chunk
             const { done: chunkDone, value } = await currentReader.read()
-            if (!chunkDone && value) {
+            if (!chunkDone) {
               controller.enqueue(value)
             } else {
               currentReader = null
@@ -427,32 +409,68 @@ export class StreamResponseImpl<
 
   jsonStream(): ReadableStream<TJson> {
     this.#ensureJsonMode()
+    this.#markConsuming()
     const self = this
-    const decoder = new TextDecoder()
+    const responseGenerator = this.#generateResponses()
+    let pendingItems: Array<TJson> = []
 
-    // Transform bytes to JSON items
-    return this.bodyStream().pipeThrough(
-      new TransformStream<Uint8Array, TJson>({
-        transform(chunk, controller) {
-          const text = decoder.decode(chunk, { stream: true })
-          if (text.trim()) {
-            const items = self.#parseJsonText<TJson>(text)
-            for (const item of items) {
-              controller.enqueue(item)
+    return new ReadableStream<TJson>({
+      async pull(controller) {
+        try {
+          // If we have pending items, yield the next one
+          const nextItem = pendingItems.shift()
+          if (nextItem !== undefined) {
+            controller.enqueue(nextItem)
+            return
+          }
+
+          // Get next response and parse JSON
+          const { done, value: response } = await responseGenerator.next()
+          if (done) {
+            self.#markClosed()
+            controller.close()
+            return
+          }
+
+          // Use the efficient json() method on Response
+          const parsed = (await response.json()) as TJson | Array<TJson>
+          if (Array.isArray(parsed)) {
+            pendingItems = parsed
+          } else {
+            pendingItems = [parsed]
+          }
+
+          // Yield first item
+          const firstItem = pendingItems.shift()
+          if (firstItem !== undefined) {
+            controller.enqueue(firstItem)
+          }
+
+          // Check if we should stop
+          if (self.upToDate && !self.#shouldContinueLive()) {
+            // Drain remaining items first
+            if (pendingItems.length === 0) {
+              self.#markClosed()
+              controller.close()
             }
           }
-        },
-        flush(controller) {
-          const remaining = decoder.decode()
-          if (remaining.trim()) {
-            const items = self.#parseJsonText<TJson>(remaining)
-            for (const item of items) {
-              controller.enqueue(item)
-            }
+        } catch (err) {
+          if (self.#abortController.signal.aborted) {
+            self.#markClosed()
+            controller.close()
+          } else {
+            self.#markError(err instanceof Error ? err : new Error(String(err)))
+            controller.error(err)
           }
-        },
-      })
-    )
+        }
+      },
+
+      cancel() {
+        responseGenerator.return()
+        self.#abortController.abort()
+        self.#markClosed()
+      },
+    })
   }
 
   textStream(): ReadableStream<string> {
@@ -490,8 +508,9 @@ export class StreamResponseImpl<
         for await (const response of self.#generateResponses()) {
           if (abortController.signal.aborted) break
 
-          const text = await response.text()
-          const items = text.trim() ? self.#parseJsonText<TJson>(text) : []
+          // Use the efficient json() method on Response
+          const parsed = (await response.json()) as TJson | Array<TJson>
+          const items = Array.isArray(parsed) ? parsed : [parsed]
 
           await subscriber({
             items,
