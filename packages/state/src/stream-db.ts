@@ -44,6 +44,7 @@ type StreamDB<T extends Record<string, CollectionDefinition>> = {
   >
 } & {
   preload: () => Promise<void>
+  close: () => void
 }
 
 /**
@@ -76,6 +77,18 @@ export async function createStreamDB<
   // Track preload promise
   let preloadPromise: Promise<void> | null = null
 
+  // AbortController for the stream subscription
+  const abortController = new AbortController()
+
+  // Track whether streaming has started
+  let hasStartedStreaming = false
+
+  // Track when we've caught up with existing events
+  let upToDateResolver: (() => void) | null = null
+  const upToDatePromise = new Promise<void>((resolve) => {
+    upToDateResolver = resolve
+  })
+
   // Store sync callbacks for each collection
   const syncCallbacks: Map<
     string,
@@ -86,34 +99,15 @@ export async function createStreamDB<
     }
   > = new Map()
 
-  // Create all collections, storing their sync callbacks
-  const tanstackCollections: Record<string, Collection> = {}
-
-  for (const [collectionName, definition] of Object.entries(
-    state.collections
-  )) {
-    tanstackCollections[collectionName] = new Collection({
-      id: collectionName,
-      schema: definition.schema,
-      sync: {
-        sync: ({ write, begin, commit }) => {
-          // Just store the callbacks - we'll start sync manually later
-          syncCallbacks.set(collectionName, { write, begin, commit })
-        },
-      },
-    })
-  }
-
-  // Function to start syncing from the stream
-  const startSync = () => {
-    // Begin all collections
-    for (const cb of syncCallbacks.values()) {
-      cb.begin()
-    }
+  // Function to start syncing from the stream (called automatically on first sync)
+  const startStreamIfNeeded = () => {
+    if (hasStartedStreaming) return
+    hasStartedStreaming = true
 
     // Subscribe to stream and route events to appropriate collections
+    // Note: begin() is called per-collection in their sync callback
     stream.subscribeJson<StateEvent>(
-      (events) => {
+      (events, metadata) => {
         for (const event of events) {
           if (isChangeEvent(event)) {
             const targetCollectionName = typeToCollectionName.get(event.type)
@@ -140,6 +134,12 @@ export async function createStreamDB<
           cb.commit()
         }
 
+        // Check if we've caught up with existing events
+        if (metadata.upToDate && upToDateResolver) {
+          upToDateResolver()
+          upToDateResolver = null
+        }
+
         // Begin again for next batch
         for (const cb of syncCallbacks.values()) {
           cb.begin()
@@ -147,9 +147,32 @@ export async function createStreamDB<
       },
       {
         offset: `-1`,
-        live: false,
+        live: true,
+        signal: abortController.signal,
       }
     )
+  }
+
+  // Create all collections, storing their sync callbacks
+  const tanstackCollections: Record<string, Collection> = {}
+
+  for (const [collectionName, definition] of Object.entries(
+    state.collections
+  )) {
+    tanstackCollections[collectionName] = new Collection({
+      id: collectionName,
+      schema: definition.schema,
+      sync: {
+        sync: ({ write, begin, commit }) => {
+          // Store the callbacks
+          syncCallbacks.set(collectionName, { write, begin, commit })
+          // Auto-start streaming when first collection requests sync
+          startStreamIfNeeded()
+          // Begin this collection's sync transaction
+          begin()
+        },
+      },
+    })
   }
 
   // Wrap TanStack DB collections to add convenience methods
@@ -161,21 +184,27 @@ export async function createStreamDB<
     collections[name] = tanstackCollection
   }
 
-  // Add preload method that starts sync and waits for all collections to sync
+  // Add preload method that ensures streaming starts and waits for catch-up
   const db = collections as StreamDB<T>
   db.preload = async () => {
     if (!preloadPromise) {
-      // Start syncing from the stream
-      startSync()
+      // Ensure streaming has started (it may have already started automatically)
+      startStreamIfNeeded()
 
-      // Wait for all collections to be ready
-      preloadPromise = Promise.all(
-        Object.values(tanstackCollections).map((collection) =>
+      // Wait for all collections to be ready AND for the stream to catch up
+      preloadPromise = Promise.all([
+        ...Object.values(tanstackCollections).map((collection) =>
           collection.stateWhenReady()
-        )
-      ).then(() => undefined)
+        ),
+        upToDatePromise,
+      ]).then(() => undefined)
     }
     return preloadPromise
+  }
+
+  // Add close method to abort the stream subscription
+  db.close = () => {
+    abortController.abort()
   }
 
   return db
