@@ -27,7 +27,6 @@ export { DurableStream, type DurableStreamOptions } from "./stream"
 export type {
   // Core types
   Offset,
-  Auth,
   HeadersRecord,
   ParamsRecord,
   MaybePromise,

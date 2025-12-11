@@ -72,6 +72,13 @@ export class StreamResponseImpl<
   readonly live: LiveMode
   readonly startOffset: Offset
 
+  // --- Response metadata (updated on each response) ---
+  #headers: Headers
+  #status: number
+  #statusText: string
+  #ok: boolean
+  #isLoading: boolean
+
   // --- Evolving state ---
   offset: Offset
   cursor?: string
@@ -99,6 +106,16 @@ export class StreamResponseImpl<
     this.cursor = config.initialCursor
     this.upToDate = config.initialUpToDate
 
+    // Initialize response metadata from first response
+    this.#headers = config.firstResponse.headers
+    this.#status = config.firstResponse.status
+    this.#statusText = config.firstResponse.statusText
+    this.#ok = config.firstResponse.ok
+    // isLoading is false because stream() already awaited the first response
+    // before creating this StreamResponse. By the time user has this object,
+    // the initial request has completed.
+    this.#isLoading = false
+
     this.#isJsonMode = config.isJsonMode
     this.#abortController = config.abortController
     this.#fetchNext = config.fetchNext
@@ -111,6 +128,28 @@ export class StreamResponseImpl<
 
     // Create the core response stream
     this.#responseStream = this.#createResponseStream(config.firstResponse)
+  }
+
+  // --- Response metadata getters ---
+
+  get headers(): Headers {
+    return this.#headers
+  }
+
+  get status(): number {
+    return this.#status
+  }
+
+  get statusText(): string {
+    return this.#statusText
+  }
+
+  get ok(): boolean {
+    return this.#ok
+  }
+
+  get isLoading(): boolean {
+    return this.#isLoading
   }
 
   // =================================
@@ -149,11 +188,18 @@ export class StreamResponseImpl<
    * Update state from response headers.
    */
   #updateStateFromResponse(response: Response): void {
+    // Update stream-specific state
     const offset = response.headers.get(STREAM_OFFSET_HEADER)
     if (offset) this.offset = offset
     const cursor = response.headers.get(STREAM_CURSOR_HEADER)
     if (cursor) this.cursor = cursor
     this.upToDate = response.headers.has(STREAM_UP_TO_DATE_HEADER)
+
+    // Update response metadata to reflect latest server response
+    this.#headers = response.headers
+    this.#status = response.status
+    this.#statusText = response.statusText
+    this.#ok = response.ok
   }
 
   /**

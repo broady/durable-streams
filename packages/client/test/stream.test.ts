@@ -35,29 +35,29 @@ describe(`DurableStream`, () => {
       expect(stream.contentType).toBeUndefined()
     })
 
-    it(`should accept auth token`, () => {
+    it(`should accept static headers`, () => {
       const stream = new DurableStream({
         url: `https://example.com/stream`,
-        auth: { token: `my-token` },
+        headers: { Authorization: `Bearer my-token` },
       })
 
       expect(stream.url).toBe(`https://example.com/stream`)
     })
 
-    it(`should accept auth headers`, () => {
+    it(`should accept function headers`, () => {
       const stream = new DurableStream({
         url: `https://example.com/stream`,
-        auth: { headers: { Authorization: `Bearer token` } },
+        headers: { Authorization: () => `Bearer token` },
       })
 
       expect(stream.url).toBe(`https://example.com/stream`)
     })
 
-    it(`should accept async auth headers`, () => {
+    it(`should accept async function headers`, () => {
       const stream = new DurableStream({
         url: `https://example.com/stream`,
-        auth: {
-          getHeaders: async () => ({ Authorization: `Bearer token` }),
+        headers: {
+          Authorization: async () => `Bearer token`,
         },
       })
 
@@ -333,7 +333,7 @@ describe(`DurableStream`, () => {
       const stream = new DurableStream({
         url: `https://example.com/stream`,
         fetch: mockFetch,
-        auth: { token: `my-secret-token` },
+        headers: { Authorization: `Bearer my-secret-token` },
       })
 
       await stream.head()
@@ -342,13 +342,13 @@ describe(`DurableStream`, () => {
         expect.anything(),
         expect.objectContaining({
           headers: expect.objectContaining({
-            authorization: `Bearer my-secret-token`,
+            Authorization: `Bearer my-secret-token`,
           }),
         })
       )
     })
 
-    it(`should include custom auth header name`, async () => {
+    it(`should include custom header names`, async () => {
       const mockFetch = vi.fn().mockResolvedValue(
         new Response(null, {
           status: 200,
@@ -359,7 +359,7 @@ describe(`DurableStream`, () => {
       const stream = new DurableStream({
         url: `https://example.com/stream`,
         fetch: mockFetch,
-        auth: { token: `my-token`, headerName: `x-api-key` },
+        headers: { "x-api-key": `Bearer my-token` },
       })
 
       await stream.head()
@@ -374,7 +374,7 @@ describe(`DurableStream`, () => {
       )
     })
 
-    it(`should include static auth headers`, async () => {
+    it(`should include static headers`, async () => {
       const mockFetch = vi.fn().mockResolvedValue(
         new Response(null, {
           status: 200,
@@ -385,7 +385,7 @@ describe(`DurableStream`, () => {
       const stream = new DurableStream({
         url: `https://example.com/stream`,
         fetch: mockFetch,
-        auth: { headers: { Authorization: `Basic abc123` } },
+        headers: { Authorization: `Basic abc123` },
       })
 
       await stream.head()
@@ -400,7 +400,7 @@ describe(`DurableStream`, () => {
       )
     })
 
-    it(`should resolve async auth headers`, async () => {
+    it(`should resolve async function headers`, async () => {
       const mockFetch = vi.fn().mockResolvedValue(
         new Response(null, {
           status: 200,
@@ -411,10 +411,8 @@ describe(`DurableStream`, () => {
       const stream = new DurableStream({
         url: `https://example.com/stream`,
         fetch: mockFetch,
-        auth: {
-          getHeaders: async () => ({
-            Authorization: `Bearer dynamic-token`,
-          }),
+        headers: {
+          Authorization: async () => `Bearer dynamic-token`,
         },
       })
 
@@ -853,14 +851,14 @@ describe(`DurableStream`, () => {
       await DurableStream.delete({
         url: `https://example.com/stream`,
         fetch: mockFetch,
-        auth: { token: `my-token` },
+        headers: { Authorization: `Bearer my-token` },
       })
 
       expect(mockFetch).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({
           headers: expect.objectContaining({
-            authorization: `Bearer my-token`,
+            Authorization: `Bearer my-token`,
           }),
         })
       )

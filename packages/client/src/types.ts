@@ -4,6 +4,8 @@
  * Following the Electric Durable Stream Protocol specification.
  */
 
+import type { BackoffOptions } from "./fetch"
+
 /**
  * Offset string - opaque to the client.
  * Format: "<read-seq>_<byte-offset>"
@@ -18,21 +20,17 @@ export type Offset = string
 export type MaybePromise<T> = T | Promise<T>
 
 /**
- * Auth configuration for requests.
- *
- * Supports:
- * - Fixed tokens with optional custom header name
- * - Arbitrary static headers
- * - Async header resolution (e.g., for short-lived tokens)
- */
-export type Auth =
-  | { token: string; headerName?: string } // default "authorization: Bearer <token>"
-  | { headers: Record<string, string> }
-  | { getHeaders: () => Promise<Record<string, string>> }
-
-/**
  * Headers record where values can be static strings or async functions.
  * Following the @electric-sql/client pattern for dynamic headers.
+ *
+ * @example
+ * ```typescript
+ * headers: {
+ *   Authorization: `Bearer ${token}`,           // Static
+ *   'X-Tenant-Id': () => getCurrentTenant(),    // Sync function
+ *   'X-Auth': async () => await refreshToken()  // Async function
+ * }
+ * ```
  */
 export type HeadersRecord = {
   [key: string]: string | (() => MaybePromise<string>)
@@ -74,21 +72,27 @@ export interface StreamOptions {
   url: string | URL
 
   /**
-   * Authentication configuration.
-   * If using auth, you can provide:
-   * - A token (sent as Bearer token in Authorization header by default)
-   * - Custom headers
-   * - An async function to get headers (for refreshing tokens)
-   */
-  auth?: Auth
-
-  /**
-   * Additional headers to include in requests.
+   * HTTP headers to include in requests.
    * Values can be strings or functions (sync or async) that return strings.
    * Function values are resolved when needed, making this useful
    * for dynamic headers like authentication tokens.
+   *
+   * @example
+   * ```typescript
+   * headers: {
+   *   Authorization: `Bearer ${token}`,           // Static
+   *   'X-Tenant-Id': () => getCurrentTenant(),    // Sync function
+   *   'X-Auth': async () => await refreshToken()  // Async function
+   * }
+   * ```
    */
-  headers?: HeadersInit
+  headers?: HeadersRecord
+
+  /**
+   * Query parameters to include in requests.
+   * Values can be strings or functions (sync or async) that return strings.
+   */
+  params?: ParamsRecord
 
   /**
    * AbortSignal for cancellation.
@@ -100,6 +104,12 @@ export interface StreamOptions {
    * Defaults to globalThis.fetch.
    */
   fetchClient?: typeof globalThis.fetch
+
+  /**
+   * Backoff options for retry behavior.
+   * Defaults to exponential backoff with jitter.
+   */
+  backoffOptions?: BackoffOptions
 
   /**
    * Starting offset (query param ?offset=...).
@@ -196,17 +206,14 @@ export interface StreamHandleOptions {
   url: string | URL
 
   /**
-   * Authentication configuration.
-   */
-  auth?: Auth
-
-  /**
-   * Additional headers to include in requests.
+   * HTTP headers to include in requests.
+   * Values can be strings or functions (sync or async) that return strings.
    */
   headers?: HeadersRecord
 
   /**
-   * Additional query parameters to include in requests.
+   * Query parameters to include in requests.
+   * Values can be strings or functions (sync or async) that return strings.
    */
   params?: ParamsRecord
 
@@ -470,7 +477,7 @@ export interface StreamResponse<TJson = unknown> {
   readonly url: string
 
   /**
-   * The stream's content type.
+   * The stream's content type (from first response).
    */
   readonly contentType?: string
 
@@ -483,6 +490,41 @@ export interface StreamResponse<TJson = unknown> {
    * The starting offset for this session.
    */
   readonly startOffset: Offset
+
+  // --- Response metadata (updated on each response) ---
+
+  /**
+   * HTTP response headers from the most recent server response.
+   * Updated on each long-poll/SSE response.
+   */
+  readonly headers: Headers
+
+  /**
+   * HTTP status code from the most recent server response.
+   * Updated on each long-poll/SSE response.
+   */
+  readonly status: number
+
+  /**
+   * HTTP status text from the most recent server response.
+   * Updated on each long-poll/SSE response.
+   */
+  readonly statusText: string
+
+  /**
+   * Whether the most recent response was successful (status 200-299).
+   * Always true for active streams (errors are thrown).
+   */
+  readonly ok: boolean
+
+  /**
+   * Whether the stream is waiting for initial data.
+   *
+   * Note: Always false in current implementation because stream() awaits
+   * the first response before returning. A future async iterator API
+   * could expose this as true during initial connection.
+   */
+  readonly isLoading: boolean
 
   // --- Evolving state as data arrives ---
 
@@ -549,9 +591,10 @@ export interface StreamResponse<TJson = unknown> {
   // 3) Subscriber APIs
   // =====================
   // Subscribers return Promise<void> for backpressure control.
+  // Note: Only one consumption method can be used per StreamResponse.
 
   /**
-   * Zero-overhead JSON batches; multiple subscribers share the same parsed arrays.
+   * Subscribe to JSON batches as they arrive.
    * Returns unsubscribe function.
    */
   subscribeJson: (
@@ -559,7 +602,7 @@ export interface StreamResponse<TJson = unknown> {
   ) => () => void
 
   /**
-   * Raw byte chunks; multiple subscribers share the same Uint8Array.
+   * Subscribe to raw byte chunks as they arrive.
    * Returns unsubscribe function.
    */
   subscribeBytes: (
@@ -567,7 +610,7 @@ export interface StreamResponse<TJson = unknown> {
   ) => () => void
 
   /**
-   * Text chunks; multiple subscribers share the same string instances.
+   * Subscribe to text chunks as they arrive.
    * Returns unsubscribe function.
    */
   subscribeText: (subscriber: (chunk: TextChunk) => Promise<void>) => () => void

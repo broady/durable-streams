@@ -17,12 +17,18 @@ import {
   createFetchWithConsumedBody,
 } from "./fetch"
 import { stream as streamFn } from "./stream-api"
-import { handleErrorResponse, resolveHeaders, resolveValue } from "./utils"
+import {
+  handleErrorResponse,
+  resolveHeaders,
+  resolveParams,
+} from "./utils"
 import type {
   AppendOptions,
   CreateOptions,
   HeadResult,
+  HeadersRecord,
   MaybePromise,
+  ParamsRecord,
   StreamErrorHandler,
   StreamHandleOptions,
   StreamOptions,
@@ -342,13 +348,19 @@ export class DurableStream {
   // ============================================================================
 
   /**
-   * Start a fetch-like streaming session against this handle's URL/auth.
+   * Start a fetch-like streaming session against this handle's URL/headers/params.
    * The first request is made inside this method; it resolves when we have
    * a valid first response, or rejects on errors.
    *
+   * Call-specific headers and params are merged with handle-level ones,
+   * with call-specific values taking precedence.
+   *
    * @example
    * ```typescript
-   * const handle = await DurableStream.connect({ url, auth });
+   * const handle = await DurableStream.connect({
+   *   url,
+   *   headers: { Authorization: `Bearer ${token}` }
+   * });
    * const res = await handle.stream<{ message: string }>();
    *
    * // Accumulate all JSON items
@@ -371,14 +383,27 @@ export class DurableStream {
    * ```
    */
   async stream<TJson = unknown>(
-    options?: Omit<StreamOptions, `url` | `auth`>
+    options?: Omit<StreamOptions, `url`>
   ): Promise<StreamResponse<TJson>> {
+    // Merge handle-level and call-specific headers
+    const mergedHeaders: HeadersRecord = {
+      ...this.#options.headers,
+      ...options?.headers,
+    }
+
+    // Merge handle-level and call-specific params
+    const mergedParams: ParamsRecord = {
+      ...this.#options.params,
+      ...options?.params,
+    }
+
     return streamFn<TJson>({
       url: this.url,
-      auth: this.#options.auth,
-      headers: options?.headers,
+      headers: mergedHeaders,
+      params: mergedParams,
       signal: options?.signal ?? this.#options.signal,
       fetchClient: this.#options.fetch,
+      backoffOptions: this.#options.backoffOptions,
       offset: options?.offset,
       live: options?.live,
       json: options?.json,
@@ -397,28 +422,16 @@ export class DurableStream {
     requestHeaders: Record<string, string>
     fetchUrl: URL
   }> {
-    const requestHeaders = await this.#resolveHeaders()
+    const requestHeaders = await resolveHeaders(this.#options.headers)
     const fetchUrl = new URL(this.url)
 
     // Add params
-    const params = this.#options.params
-    if (params) {
-      for (const [key, value] of Object.entries(params)) {
-        if (value !== undefined) {
-          const resolved = await resolveValue(value)
-          fetchUrl.searchParams.set(key, resolved)
-        }
-      }
+    const params = await resolveParams(this.#options.params)
+    for (const [key, value] of Object.entries(params)) {
+      fetchUrl.searchParams.set(key, value)
     }
 
     return { requestHeaders, fetchUrl }
-  }
-
-  /**
-   * Resolve headers from auth and headers options.
-   */
-  async #resolveHeaders(): Promise<Record<string, string>> {
-    return resolveHeaders(this.#options.auth, this.#options.headers)
   }
 }
 

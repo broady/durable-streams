@@ -14,7 +14,7 @@ import {
 import { DurableStreamError, FetchBackoffAbortError } from "./error"
 import { BackoffDefaults, createFetchWithBackoff } from "./fetch"
 import { StreamResponseImpl } from "./response"
-import { handleErrorResponse, resolveHeaders } from "./utils"
+import { handleErrorResponse, resolveHeaders, resolveParams } from "./utils"
 import type { LiveMode, Offset, StreamOptions, StreamResponse } from "./types"
 
 /**
@@ -61,6 +61,61 @@ export async function stream<TJson = unknown>(
     )
   }
 
+  // Mutable options that can be updated by onError handler
+  let currentHeaders = options.headers
+  let currentParams = options.params
+
+  // Retry loop for onError handling
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+  while (true) {
+    try {
+      return await streamInternal<TJson>({
+        ...options,
+        headers: currentHeaders,
+        params: currentParams,
+      })
+    } catch (err) {
+      // If there's an onError handler, give it a chance to recover
+      if (options.onError) {
+        const retryOpts = await options.onError(
+          err instanceof Error ? err : new Error(String(err))
+        )
+
+        // If handler returns void/undefined, stop retrying
+        if (retryOpts === undefined) {
+          throw err
+        }
+
+        // Merge returned params/headers for retry
+        if (retryOpts.params) {
+          currentParams = {
+            ...currentParams,
+            ...retryOpts.params,
+          }
+        }
+        if (retryOpts.headers) {
+          currentHeaders = {
+            ...currentHeaders,
+            ...retryOpts.headers,
+          }
+        }
+
+        // Continue to retry with updated options
+        continue
+      }
+
+      // No onError handler, just throw
+      throw err
+    }
+  }
+}
+
+/**
+ * Internal implementation of stream that doesn't handle onError retries.
+ */
+async function streamInternal<TJson = unknown>(
+  options: StreamOptions
+): Promise<StreamResponse<TJson>> {
   // Normalize URL
   const url = options.url instanceof URL ? options.url.toString() : options.url
 
@@ -77,8 +132,14 @@ export async function stream<TJson = unknown>(
     fetchUrl.searchParams.set(LIVE_QUERY_PARAM, live)
   }
 
+  // Add custom params
+  const params = await resolveParams(options.params)
+  for (const [key, value] of Object.entries(params)) {
+    fetchUrl.searchParams.set(key, value)
+  }
+
   // Build headers
-  const headers = await resolveHeaders(options.auth, options.headers)
+  const headers = await resolveHeaders(options.headers)
 
   // Create abort controller
   const abortController = new AbortController()
@@ -90,13 +151,15 @@ export async function stream<TJson = unknown>(
     )
   }
 
-  // Get fetch client
+  // Get fetch client with backoff
   const baseFetchClient =
     options.fetchClient ??
     ((...args: Parameters<typeof fetch>) => fetch(...args))
-  const fetchClient = createFetchWithBackoff(baseFetchClient, BackoffDefaults)
+  const backoffOptions = options.backoffOptions ?? BackoffDefaults
+  const fetchClient = createFetchWithBackoff(baseFetchClient, backoffOptions)
 
   // Make the first request
+  // Backoff client will throw FetchError for non-OK responses
   let firstResponse: Response
   try {
     firstResponse = await fetchClient(fetchUrl.toString(), {
@@ -108,14 +171,8 @@ export async function stream<TJson = unknown>(
     if (err instanceof FetchBackoffAbortError) {
       throw new DurableStreamError(`Stream request was aborted`, `UNKNOWN`)
     }
+    // Let other errors (including FetchError) propagate to onError handler
     throw err
-  }
-
-  // Validate the response (headers only, don't consume body yet)
-  if (!firstResponse.ok) {
-    // Close the body to avoid leaking resources
-    await firstResponse.arrayBuffer().catch(() => {})
-    await handleErrorResponse(firstResponse, url)
   }
 
   // Extract metadata from headers
@@ -151,7 +208,12 @@ export async function stream<TJson = unknown>(
       nextUrl.searchParams.set(`cursor`, cursor)
     }
 
-    const nextHeaders = await resolveHeaders(options.auth, options.headers)
+    // Add custom params
+    for (const [key, value] of Object.entries(params)) {
+      nextUrl.searchParams.set(key, value)
+    }
+
+    const nextHeaders = await resolveHeaders(options.headers)
 
     const response = await fetchClient(nextUrl.toString(), {
       method: `GET`,
@@ -181,7 +243,12 @@ export async function stream<TJson = unknown>(
             sseUrl.searchParams.set(`cursor`, cursor)
           }
 
-          const sseHeaders = await resolveHeaders(options.auth, options.headers)
+          // Add custom params
+          for (const [key, value] of Object.entries(params)) {
+            sseUrl.searchParams.set(key, value)
+          }
+
+          const sseHeaders = await resolveHeaders(options.headers)
 
           const response = await fetchClient(sseUrl.toString(), {
             method: `GET`,

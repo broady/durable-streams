@@ -690,14 +690,14 @@ describe(`stream() function`, () => {
       await stream({
         url: `https://example.com/stream`,
         fetchClient: mockFetch,
-        auth: { token: `my-token` },
+        headers: { Authorization: `Bearer my-token` },
       })
 
       expect(mockFetch).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({
           headers: expect.objectContaining({
-            authorization: `Bearer my-token`,
+            Authorization: `Bearer my-token`,
           }),
         })
       )
@@ -764,7 +764,7 @@ describe(`DurableStream.stream() method`, () => {
     const handle = await DurableStream.connect({
       url: `https://example.com/stream`,
       fetch: mockFetch,
-      auth: { token: `handle-token` },
+      headers: { Authorization: `Bearer handle-token` },
     })
 
     const res = await handle.stream<{ id: number }>()

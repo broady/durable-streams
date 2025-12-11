@@ -21,7 +21,9 @@ import { stream } from "@durable-streams/client"
 // Connect and get a StreamResponse
 const res = await stream<{ message: string }>({
   url: "https://streams.example.com/my-account/chat/room-1",
-  auth: { token: process.env.DS_TOKEN! },
+  headers: {
+    Authorization: `Bearer ${process.env.DS_TOKEN!}`,
+  },
   offset: savedOffset, // optional: resume from offset
   live: "auto", // default: behavior driven by consumption method
 })
@@ -76,7 +78,9 @@ import { DurableStream } from "@durable-streams/client"
 // Create a new stream
 const handle = await DurableStream.create({
   url: "https://streams.example.com/my-account/chat/room-1",
-  auth: { token: process.env.DS_TOKEN! },
+  headers: {
+    Authorization: `Bearer ${process.env.DS_TOKEN!}`,
+  },
   contentType: "application/json",
   ttlSeconds: 3600,
 })
@@ -99,7 +103,10 @@ res.subscribeJson(async (batch) => {
 
 ```typescript
 // HEAD gives you the current tail offset if the server exposes it
-const handle = await DurableStream.connect({ url, auth })
+const handle = await DurableStream.connect({
+  url,
+  headers: { Authorization: `Bearer ${token}` },
+})
 const { offset } = await handle.head()
 
 // Read only new data from that point on
@@ -130,15 +137,16 @@ Creates a fetch-like streaming session:
 
 ```typescript
 const res = await stream<TJson>({
-  url: string | URL,         // Stream URL
-  auth?: Auth,               // Authentication
-  headers?: HeadersInit,     // Additional headers
-  signal?: AbortSignal,      // Cancellation
-  fetchClient?: typeof fetch,// Custom fetch implementation
-  offset?: Offset,           // Starting offset (default: start of stream)
-  live?: LiveMode,           // Live mode (default: "auto")
-  json?: boolean,            // Force JSON mode
-  onError?: StreamErrorHandler, // Error handler
+  url: string | URL,              // Stream URL
+  headers?: HeadersRecord,        // Headers (static or function-based)
+  params?: ParamsRecord,          // Query params (static or function-based)
+  signal?: AbortSignal,           // Cancellation
+  fetchClient?: typeof fetch,     // Custom fetch implementation
+  backoffOptions?: BackoffOptions,// Retry backoff configuration
+  offset?: Offset,                // Starting offset (default: start of stream)
+  live?: LiveMode,                // Live mode (default: "auto")
+  json?: boolean,                 // Force JSON mode
+  onError?: StreamErrorHandler,   // Error handler
 })
 ```
 
@@ -192,25 +200,51 @@ const res = await stream({ url, live: "long-poll" })
 const res = await stream({ url, live: "sse" })
 ```
 
-### Authentication
+### Headers and Params
+
+Headers and params support both static values and functions (sync or async) for dynamic values like authentication tokens.
 
 ```typescript
-// Fixed token (sent as Bearer token in Authorization header)
-{ auth: { token: 'my-token' } }
-
-// Custom header name
-{ auth: { token: 'my-token', headerName: 'x-api-key' } }
-
 // Static headers
-{ auth: { headers: { 'Authorization': 'Bearer my-token' } } }
-
-// Async headers (for refreshing tokens)
 {
-  auth: {
-    getHeaders: async () => {
+  headers: {
+    Authorization: "Bearer my-token",
+    "X-Custom-Header": "value",
+  }
+}
+
+// Function-based headers (sync)
+{
+  headers: {
+    Authorization: () => `Bearer ${getCurrentToken()}`,
+    "X-Tenant-Id": () => getCurrentTenant(),
+  }
+}
+
+// Async function headers (for refreshing tokens)
+{
+  headers: {
+    Authorization: async () => {
       const token = await refreshToken()
-      return { Authorization: `Bearer ${token}` }
+      return `Bearer ${token}`
     }
+  }
+}
+
+// Mix static and function headers
+{
+  headers: {
+    "X-Static": "always-the-same",
+    Authorization: async () => `Bearer ${await getToken()}`,
+  }
+}
+
+// Query params work the same way
+{
+  params: {
+    tenant: "static-tenant",
+    region: () => getCurrentRegion(),
+    token: async () => await getSessionToken(),
   }
 }
 ```
@@ -222,7 +256,9 @@ import { stream, FetchError, DurableStreamError } from "@durable-streams/client"
 
 const res = await stream({
   url: "https://streams.example.com/my-stream",
-  auth: { token: "my-token" },
+  headers: {
+    Authorization: "Bearer my-token",
+  },
   onError: async (error) => {
     if (error instanceof FetchError) {
       if (error.status === 401) {
@@ -513,7 +549,9 @@ Create a new stream on the server.
 ```typescript
 const handle = await DurableStream.create({
   url: "https://streams.example.com/my-stream",
-  auth: { token: "my-token" },
+  headers: {
+    Authorization: "Bearer my-token",
+  },
   contentType: "application/json",
   ttlSeconds: 3600, // Optional: auto-delete after 1 hour
 })
@@ -528,7 +566,9 @@ Connect to an existing stream (validates it exists via HEAD).
 ```typescript
 const handle = await DurableStream.connect({
   url: "https://streams.example.com/my-stream",
-  auth: { token: "my-token" },
+  headers: {
+    Authorization: "Bearer my-token",
+  },
 })
 
 console.log("Content-Type:", handle.contentType)
@@ -541,7 +581,9 @@ Get stream metadata without creating a handle.
 ```typescript
 const metadata = await DurableStream.head({
   url: "https://streams.example.com/my-stream",
-  auth: { token: "my-token" },
+  headers: {
+    Authorization: "Bearer my-token",
+  },
 })
 
 console.log("Offset:", metadata.offset)
@@ -555,7 +597,9 @@ Delete a stream without creating a handle.
 ```typescript
 await DurableStream.delete({
   url: "https://streams.example.com/my-stream",
-  auth: { token: "my-token" },
+  headers: {
+    Authorization: "Bearer my-token",
+  },
 })
 ```
 
@@ -566,7 +610,10 @@ await DurableStream.delete({
 Get metadata for this stream.
 
 ```typescript
-const handle = new DurableStream({ url, auth })
+const handle = new DurableStream({
+  url,
+  headers: { Authorization: `Bearer ${token}` },
+})
 const metadata = await handle.head()
 
 console.log("Current offset:", metadata.offset)
@@ -577,7 +624,10 @@ console.log("Current offset:", metadata.offset)
 Create this stream on the server.
 
 ```typescript
-const handle = new DurableStream({ url, auth })
+const handle = new DurableStream({
+  url,
+  headers: { Authorization: `Bearer ${token}` },
+})
 await handle.create({
   contentType: "text/plain",
   ttlSeconds: 7200,
@@ -589,7 +639,10 @@ await handle.create({
 Delete this stream.
 
 ```typescript
-const handle = new DurableStream({ url, auth })
+const handle = new DurableStream({
+  url,
+  headers: { Authorization: `Bearer ${token}` },
+})
 await handle.delete()
 ```
 
@@ -598,7 +651,10 @@ await handle.delete()
 Append data to the stream.
 
 ```typescript
-const handle = await DurableStream.connect({ url, auth })
+const handle = await DurableStream.connect({
+  url,
+  headers: { Authorization: `Bearer ${token}` },
+})
 
 // Append string
 await handle.append("Hello, world!")
@@ -616,7 +672,10 @@ await handle.append(JSON.stringify({ event: "click", x: 100, y: 200 }))
 Append streaming data from an async iterable or ReadableStream.
 
 ```typescript
-const handle = await DurableStream.connect({ url, auth })
+const handle = await DurableStream.connect({
+  url,
+  headers: { Authorization: `Bearer ${token}` },
+})
 
 // From async generator
 async function* generateData() {
@@ -642,7 +701,10 @@ await handle.appendStream(readable)
 Start a read session (same as standalone `stream()` function).
 
 ```typescript
-const handle = await DurableStream.connect({ url, auth })
+const handle = await DurableStream.connect({
+  url,
+  headers: { Authorization: `Bearer ${token}` },
+})
 
 const res = await handle.stream<{ message: string }>({
   offset: savedOffset,

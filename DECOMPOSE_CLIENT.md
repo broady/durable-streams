@@ -288,9 +288,10 @@ export interface StreamResponse<
   // =====================
   // Subscribers return Promise<void> for backpressure control.
   // The next chunk is not fetched until the promise resolves.
+  // Note: Only one consumption method can be used per StreamResponse.
 
   /**
-   * Zero-overhead JSON batches; multiple subscribers share the same parsed arrays.
+   * Subscribe to JSON batches as they arrive.
    * Returns unsubscribe function.
    */
   subscribeJson(
@@ -298,13 +299,13 @@ export interface StreamResponse<
   ): () => void
 
   /**
-   * Raw byte chunks; multiple subscribers share the same Uint8Array.
+   * Subscribe to raw byte chunks as they arrive.
    * Returns unsubscribe function.
    */
   subscribeBytes(subscriber: (chunk: ByteChunk) => Promise<void>): () => void
 
   /**
-   * Text chunks; multiple subscribers share the same string instances.
+   * Subscribe to text chunks as they arrive.
    * Returns unsubscribe function.
    */
   subscribeText(subscriber: (chunk: TextChunk) => Promise<void>): () => void

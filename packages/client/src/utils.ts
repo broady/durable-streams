@@ -3,56 +3,30 @@
  */
 
 import { DurableStreamError } from "./error"
-import type { Auth, MaybePromise } from "./types"
+import type { HeadersRecord, MaybePromise } from "./types"
 
 /**
- * Resolve headers from auth and additional headers.
+ * Resolve headers from HeadersRecord (supports async functions).
  * Unified implementation used by both stream() and DurableStream.
  */
 export async function resolveHeaders(
-  auth: Auth | undefined,
-  additionalHeaders?:
-    | HeadersInit
-    | Record<string, string | (() => MaybePromise<string>)>
+  headers?: HeadersRecord
 ): Promise<Record<string, string>> {
-  const headers: Record<string, string> = {}
+  const resolved: Record<string, string> = {}
 
-  // Resolve auth
-  if (auth) {
-    if (`token` in auth) {
-      const headerName = auth.headerName ?? `authorization`
-      headers[headerName] = `Bearer ${auth.token}`
-    } else if (`headers` in auth) {
-      Object.assign(headers, auth.headers)
-    } else if (`getHeaders` in auth) {
-      const authHeaders = await auth.getHeaders()
-      Object.assign(headers, authHeaders)
-    }
+  if (!headers) {
+    return resolved
   }
 
-  // Resolve additional headers
-  if (additionalHeaders) {
-    if (additionalHeaders instanceof Headers) {
-      additionalHeaders.forEach((value, key) => {
-        headers[key] = value
-      })
-    } else if (Array.isArray(additionalHeaders)) {
-      for (const [key, value] of additionalHeaders) {
-        headers[key] = value
-      }
+  for (const [key, value] of Object.entries(headers)) {
+    if (typeof value === `function`) {
+      resolved[key] = await value()
     } else {
-      // Object - may contain sync values or async functions
-      for (const [key, value] of Object.entries(additionalHeaders)) {
-        if (typeof value === `function`) {
-          headers[key] = await (value as () => MaybePromise<string>)()
-        } else {
-          headers[key] = value
-        }
-      }
+      resolved[key] = value
     }
   }
 
-  return headers
+  return resolved
 }
 
 /**
@@ -90,6 +64,31 @@ export async function handleErrorResponse(
   }
 
   throw await DurableStreamError.fromResponse(response, url)
+}
+
+/**
+ * Resolve params from ParamsRecord (supports async functions).
+ */
+export async function resolveParams(
+  params?: Record<string, string | (() => MaybePromise<string>) | undefined>
+): Promise<Record<string, string>> {
+  const resolved: Record<string, string> = {}
+
+  if (!params) {
+    return resolved
+  }
+
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined) {
+      if (typeof value === `function`) {
+        resolved[key] = await value()
+      } else {
+        resolved[key] = value
+      }
+    }
+  }
+
+  return resolved
 }
 
 /**
