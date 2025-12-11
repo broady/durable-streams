@@ -1,60 +1,93 @@
-# durable-stream
+# @durable-streams/client
 
 TypeScript client for the Electric Durable Streams protocol.
 
 ## Overview
 
-The Durable Streams client exposes a single class: `DurableStream`.
+The Durable Streams client provides two main APIs:
 
-A `DurableStream` instance is a **handle to a remote stream**, similar to a file handle:
-
-- It refers to one stream URL
-- It carries the auth and transport configuration needed to talk to that stream
-- It exposes methods to: create/delete the stream, append data, and read from the stream
-
-The handle is **lightweight** and **reusable**. It does not represent a single read session.
+1. **`stream()` function** - A fetch-like read-only API for consuming streams
+2. **`StreamHandle` class** - A handle for read/write operations on a stream
 
 ## Usage
 
-### Create and append
+### Read-only: Using `stream()` (fetch-like API)
+
+The `stream()` function provides a simple, fetch-like interface for reading from streams:
 
 ```typescript
-import { DurableStream } from "durable-stream"
+import { stream } from "@durable-streams/client"
 
-const stream = await DurableStream.create({
+// Connect and get a StreamResponse
+const res = await stream<{ message: string }>({
+  url: "https://streams.example.com/my-account/chat/room-1",
+  auth: { token: process.env.DS_TOKEN! },
+  offset: savedOffset, // optional: resume from offset
+  live: "auto", // default: behavior driven by consumption method
+})
+
+// Accumulate all JSON items until up-to-date
+const items = await res.json()
+console.log("All items:", items)
+
+// Or iterate live
+for await (const item of res.jsonItems()) {
+  console.log("item:", item)
+  saveOffset(res.offset) // persist for resumption
+}
+```
+
+### StreamResponse consumption methods
+
+The `StreamResponse` object returned by `stream()` offers multiple ways to consume data:
+
+```typescript
+// Promise helpers (accumulate until first upToDate)
+const bytes = await res.body()        // Uint8Array
+const items = await res.json()        // Array<TJson>
+const text = await res.text()         // string
+
+// ReadableStreams
+const byteStream = res.bodyStream()   // ReadableStream<Uint8Array>
+const jsonStream = res.jsonStream()   // ReadableStream<TJson>
+const textStream = res.textStream()   // ReadableStream<string>
+
+// AsyncIterators
+for await (const chunk of res.byteChunks()) { ... }
+for await (const batch of res.jsonBatches()) { ... }
+for await (const item of res.jsonItems()) { ... }
+for await (const chunk of res.textChunks()) { ... }
+
+// Subscribers (with backpressure)
+const unsubscribe = res.subscribeJson(async (batch) => {
+  await processBatch(batch.items)
+})
+```
+
+### Read/Write: Using `StreamHandle`
+
+For write operations or when you need a persistent handle:
+
+```typescript
+import { StreamHandle } from "@durable-streams/client"
+
+// Create a new stream
+const handle = await StreamHandle.create({
   url: "https://streams.example.com/my-account/chat/room-1",
   auth: { token: process.env.DS_TOKEN! },
   contentType: "application/json",
   ttlSeconds: 3600,
 })
 
-// Append UTF-8 encoded JSON
-await stream.append(JSON.stringify({ type: "message", text: "Hello" }), {
+// Append data
+await handle.append(JSON.stringify({ type: "message", text: "Hello" }), {
   seq: "writer-1-000001",
 })
-```
 
-### Read with live updates (default)
-
-```typescript
-const stream = await DurableStream.connect({
-  url: "https://streams.example.com/my-account/chat/room-1",
-  auth: { token: process.env.DS_TOKEN! },
-})
-
-// Read from the stream with live updates (default behavior)
-for await (const chunk of stream.read()) {
-  // chunk.data is Uint8Array
-  const text = new TextDecoder().decode(chunk.data)
-  console.log("chunk:", text)
-
-  // Persist the offset if you want to resume later:
-  saveOffset(chunk.offset)
-
-  if (chunk.upToDate) {
-    // Safe to flush/apply accumulated messages
-    flush()
-  }
+// Read using the new stream() API
+const res = await handle.stream<{ type: string; text: string }>()
+for await (const item of res.jsonItems()) {
+  console.log("message:", item.text)
 }
 ```
 
@@ -62,10 +95,12 @@ for await (const chunk of stream.read()) {
 
 ```typescript
 // HEAD gives you the current tail offset if the server exposes it
-const { offset } = await stream.head()
+const handle = await StreamHandle.connect({ url, auth })
+const { offset } = await handle.head()
 
 // Read only new data from that point on
-for await (const chunk of stream.read({ offset })) {
+const res = await handle.stream({ offset })
+for await (const chunk of res.byteChunks()) {
   console.log("new data:", new TextDecoder().decode(chunk.data))
 }
 ```
@@ -74,71 +109,82 @@ for await (const chunk of stream.read({ offset })) {
 
 ```typescript
 // Read existing data only, stop when up-to-date
-for await (const chunk of stream.read({ live: false })) {
-  console.log("existing data:", new TextDecoder().decode(chunk.data))
-}
-// Iteration completes when stream is up-to-date
-```
+const res = await stream({
+  url: "https://streams.example.com/my-stream",
+  live: false,
+})
 
-### Pipe via ReadableStream
-
-```typescript
-const rs = stream.toReadableStream({ offset: savedOffset })
-
-await rs
-  .pipeThrough(
-    new TransformStream({
-      transform(chunk, controller) {
-        controller.enqueue(chunk.data)
-      },
-    })
-  )
-  .pipeTo(someWritableStream)
-```
-
-### Get raw bytes
-
-```typescript
-// toByteStream() returns ReadableStream<Uint8Array>
-const byteStream = stream.toByteStream({ offset: savedOffset })
-await byteStream.pipeTo(destination)
+const text = await res.text()
+console.log("All existing data:", text)
 ```
 
 ## API
 
-### `DurableStream`
+### `stream(options): Promise<StreamResponse>`
+
+Creates a fetch-like streaming session:
 
 ```typescript
-class DurableStream {
+const res = await stream<TJson>({
+  url: string | URL,         // Stream URL
+  auth?: Auth,               // Authentication
+  headers?: HeadersInit,     // Additional headers
+  signal?: AbortSignal,      // Cancellation
+  fetchClient?: typeof fetch,// Custom fetch implementation
+  offset?: Offset,           // Starting offset (default: start of stream)
+  live?: LiveMode,           // Live mode (default: "auto")
+  json?: boolean,            // Force JSON mode
+  onError?: StreamErrorHandler, // Error handler
+})
+```
+
+### `StreamHandle`
+
+```typescript
+class StreamHandle {
   readonly url: string
   readonly contentType?: string
 
-  constructor(opts: DurableStreamOptions)
+  constructor(opts: StreamHandleConstructorOptions)
 
   // Static methods
-  static create(opts: CreateOptions): Promise<DurableStream>
-  static connect(opts: StreamOptions): Promise<DurableStream>
-  static head(opts: StreamOptions): Promise<HeadResult>
-  static delete(opts: StreamOptions): Promise<void>
+  static create(opts: CreateOptions): Promise<StreamHandle>
+  static connect(opts: StreamHandleOptions): Promise<StreamHandle>
+  static head(opts: StreamHandleOptions): Promise<HeadResult>
+  static delete(opts: StreamHandleOptions): Promise<void>
 
   // Instance methods
   head(opts?: { signal?: AbortSignal }): Promise<HeadResult>
   create(opts?: CreateOptions): Promise<this>
   delete(opts?: { signal?: AbortSignal }): Promise<void>
-  append(
-    body: BodyInit | Uint8Array | string,
-    opts?: AppendOptions
-  ): Promise<void>
-  appendStream(
-    source: AsyncIterable<Uint8Array | string>,
-    opts?: AppendOptions
-  ): Promise<void>
+  append(body: BodyInit | Uint8Array | string, opts?: AppendOptions): Promise<void>
+  appendStream(source: AsyncIterable<Uint8Array | string>, opts?: AppendOptions): Promise<void>
+  
+  // New fetch-like read API
+  stream<TJson>(opts?: StreamOptions): Promise<StreamResponse<TJson>>
+  
+  // Legacy read methods (deprecated)
   read(opts?: ReadOptions): AsyncIterable<StreamChunk>
   toReadableStream(opts?: ReadOptions): ReadableStream<StreamChunk>
   toByteStream(opts?: ReadOptions): ReadableStream<Uint8Array>
-  json<T>(opts?: ReadOptions): AsyncIterable<T>
-  text(opts?: ReadOptions): AsyncIterable<string>
 }
+```
+
+### Live Modes
+
+```typescript
+// "auto" (default): behavior driven by consumption method
+// - Promise helpers (body/json/text): stop after upToDate
+// - Iterators/streams/subscribers: continue with long-poll
+
+// false: catch-up only, stop at first upToDate
+const res = await stream({ url, live: false })
+
+// "long-poll": explicit long-poll mode for live updates
+const res = await stream({ url, live: "long-poll" })
+
+// "sse": explicit SSE mode for live updates
+const res = await stream({ url, live: "sse" })
 ```
 
 ### Authentication
@@ -167,21 +213,19 @@ class DurableStream {
 ### Error Handling
 
 ```typescript
-import { DurableStream, FetchError, DurableStreamError } from "durable-stream"
+import { stream, FetchError, DurableStreamError } from "@durable-streams/client"
 
-const stream = new DurableStream({
+const res = await stream({
   url: "https://streams.example.com/my-stream",
   auth: { token: "my-token" },
   onError: async (error) => {
     if (error instanceof FetchError) {
-      // Transport error
       if (error.status === 401) {
         const newToken = await refreshAuthToken()
         return { headers: { Authorization: `Bearer ${newToken}` } }
       }
     }
     if (error instanceof DurableStreamError) {
-      // Protocol error
       console.error(`Stream error: ${error.code}`)
     }
     return {} // Retry with same params
@@ -189,28 +233,14 @@ const stream = new DurableStream({
 })
 ```
 
-### Live Modes
-
-```typescript
-// Default: catch-up then auto-select SSE or long-poll for live updates
-for await (const chunk of stream.read()) { ... }
-
-// Catch-up only (no live updates, stop at upToDate)
-for await (const chunk of stream.read({ live: false })) { ... }
-
-// Long-poll mode for live updates
-for await (const chunk of stream.read({ live: 'long-poll' })) { ... }
-
-// SSE mode for live updates (throws if content-type doesn't support SSE)
-for await (const chunk of stream.read({ live: 'sse' })) { ... }
-```
-
 ## Types
 
 Key types exported from the package:
 
 - `Offset` - Opaque string for stream position
-- `StreamChunk` / `ReadResult` - Data returned from reads
+- `StreamResponse` - Response object from stream()
+- `ByteChunk` / `JsonBatch` / `TextChunk` - Data types for consumption
+- `StreamChunk` / `ReadResult` - Legacy data types from reads
 - `HeadResult` - Metadata from HEAD requests
 - `DurableStreamError` - Protocol-level errors with codes
 - `FetchError` - Transport/network errors

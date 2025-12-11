@@ -1272,11 +1272,3 @@ function validateOptions(
   }
 }
 
-// ============================================================================
-// Backward compatibility aliases
-// ============================================================================
-
-/**
- * @deprecated Use StreamHandle instead. DurableStream is an alias for backward compatibility.
- */
-export const DurableStream = StreamHandle

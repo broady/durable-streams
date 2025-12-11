@@ -5,15 +5,12 @@
 
 import type { StreamChunk, StreamHandle } from "../../src"
 
-// DurableStream is a backward-compatibility alias for StreamHandle
-type DurableStream = StreamHandle
-
 /**
  * Process chunks from a read() iterator with a handler.
  * Resolves when handler calls resolve(), rejects on error.
  */
 export async function forEachChunk(
-  stream: DurableStream,
+  stream: StreamHandle,
   controller: AbortController,
   handler: (
     resolve: () => void,
@@ -43,7 +40,7 @@ export async function forEachChunk(
  * Collect all chunks until up-to-date or timeout.
  */
 export async function collectChunks(
-  stream: DurableStream,
+  stream: StreamHandle,
   options: {
     signal?: AbortSignal
     maxChunks?: number
@@ -97,7 +94,7 @@ export async function collectChunks(
  * Wait for a stream to receive data and become up-to-date.
  */
 export async function waitForUpToDate(
-  stream: DurableStream,
+  stream: StreamHandle,
   options: {
     signal?: AbortSignal
     timeout?: number

@@ -20,12 +20,10 @@ export { StreamResponseImpl } from "./response"
 // Handle API (read/write)
 // ============================================================================
 
-// StreamHandle class (renamed from DurableStream)
+// StreamHandle class for read/write operations
 export {
   StreamHandle,
-  DurableStream, // backward compatibility alias
   type StreamHandleConstructorOptions,
-  type DurableStreamOptions,
 } from "./stream"
 
 // ============================================================================
