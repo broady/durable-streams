@@ -515,6 +515,7 @@ export class DurableStreamTestServer {
 
     let currentOffset = initialOffset
     let isConnected = true
+    const decoder = new TextDecoder()
 
     // Handle client disconnect
     res.on(`close`, () => {
@@ -537,10 +538,11 @@ export class DurableStreamTestServer {
         // Format data based on content type
         let dataPayload: string
         if (isJsonStream) {
-          // Wrap JSON in array brackets for SSE
-          dataPayload = `[${new TextDecoder().decode(message.data)}]`
+          // Use formatResponse to get properly formatted JSON (strips trailing commas)
+          const jsonBytes = this.store.formatResponse(path, [message])
+          dataPayload = decoder.decode(jsonBytes)
         } else {
-          dataPayload = new TextDecoder().decode(message.data)
+          dataPayload = decoder.decode(message.data)
         }
 
         // Send data event
@@ -550,9 +552,13 @@ export class DurableStreamTestServer {
         currentOffset = message.offset
       }
 
+      // Compute offset the same way as HTTP GET: last message's offset, or stream's current offset
+      const controlOffset =
+        messages[messages.length - 1]?.offset ?? stream!.currentOffset
+
       // Send control event with current offset/cursor
       const controlData: Record<string, string> = {
-        [STREAM_OFFSET_HEADER]: currentOffset,
+        [STREAM_OFFSET_HEADER]: controlOffset,
       }
       if (cursor) {
         controlData[STREAM_CURSOR_HEADER] = cursor
@@ -560,6 +566,9 @@ export class DurableStreamTestServer {
 
       res.write(`event: control\n`)
       res.write(`data: ${JSON.stringify(controlData)}\n\n`)
+
+      // Update currentOffset for next iteration (use controlOffset for consistency)
+      currentOffset = controlOffset
 
       // If caught up, wait for new messages
       if (upToDate) {

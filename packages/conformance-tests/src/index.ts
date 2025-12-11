@@ -2457,7 +2457,7 @@ export function runConformanceTests(options: ConformanceTestOptions): void {
       }
     })
 
-    test(`should wrap JSON data in arrays for SSE`, async () => {
+    test(`should wrap JSON data in arrays for SSE and produce valid JSON`, async () => {
       const streamPath = `/v1/stream/sse-json-wrap-test-${Date.now()}`
 
       // Create JSON stream
@@ -2499,8 +2499,19 @@ export function runConformanceTests(options: ConformanceTestOptions): void {
 
         // JSON data should be wrapped in array brackets
         expect(received).toContain(`event: data`)
-        // The data line should contain the JSON wrapped in []
-        expect(received).toMatch(/data:.*\[.*\{.*"id".*:.*1.*\}.*\]/)
+
+        // Extract and parse the JSON payload to verify it's valid
+        const dataLine = received
+          .split(`\n`)
+          .find((l) => l.startsWith(`data: `) && l.includes(`[`))
+        expect(dataLine).toBeDefined()
+
+        const payload = dataLine!.slice(`data: `.length)
+        // This will throw if JSON is invalid (e.g., trailing comma)
+        const parsed = JSON.parse(payload)
+
+        // Verify the structure matches what we sent
+        expect(parsed).toEqual([{ id: 1, message: `hello` }])
       } catch (e) {
         clearTimeout(timeoutId)
         if (e instanceof Error && e.name !== `AbortError`) {
@@ -2509,7 +2520,7 @@ export function runConformanceTests(options: ConformanceTestOptions): void {
       }
     })
 
-    test(`should handle SSE for empty stream`, async () => {
+    test(`should handle SSE for empty stream with correct offset`, async () => {
       const streamPath = `/v1/stream/sse-empty-test-${Date.now()}`
 
       // Create empty stream
@@ -2517,6 +2528,12 @@ export function runConformanceTests(options: ConformanceTestOptions): void {
         method: `PUT`,
         headers: { "Content-Type": `text/plain` },
       })
+
+      // First, get the offset from HTTP GET (the canonical source)
+      const httpResponse = await fetch(`${getBaseUrl()}${streamPath}`)
+      const httpOffset = httpResponse.headers.get(`Stream-Next-Offset`)
+      expect(httpOffset).toBeDefined()
+      expect(httpOffset).not.toBe(`-1`) // Should be the stream's actual offset, not -1
 
       // Make SSE request
       const controller = new AbortController()
@@ -2550,6 +2567,20 @@ export function runConformanceTests(options: ConformanceTestOptions): void {
 
         // Should get a control event even for empty stream
         expect(received).toContain(`event: control`)
+
+        // Parse the control event and verify offset matches HTTP GET
+        const controlLine = received
+          .split(`\n`)
+          .find(
+            (l) => l.startsWith(`data: `) && l.includes(`Stream-Next-Offset`)
+          )
+        expect(controlLine).toBeDefined()
+
+        const controlPayload = controlLine!.slice(`data: `.length)
+        const controlData = JSON.parse(controlPayload)
+
+        // SSE control offset should match HTTP GET offset (not -1)
+        expect(controlData[`Stream-Next-Offset`]).toBe(httpOffset)
       } catch (e) {
         clearTimeout(timeoutId)
         if (e instanceof Error && e.name !== `AbortError`) {
