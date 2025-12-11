@@ -21,18 +21,6 @@ import type {
 } from "./types"
 
 /**
- * Session state machine.
- */
-enum SessionState {
-  /** First response received, Response object held (body not read) */
-  Ready = `ready`,
-  /** At least one consumer (stream/subscriber) is active */
-  Consuming = `consuming`,
-  /** Completed, cancelled, or errored */
-  Closed = `closed`,
-}
-
-/**
  * Internal configuration for creating a StreamResponse.
  */
 export interface StreamResponseConfig {
@@ -88,9 +76,7 @@ export class StreamResponseImpl<
   upToDate: boolean
 
   // --- Internal state ---
-  #state: SessionState = SessionState.Ready
   #isJsonMode: boolean
-  #firstResponse: Response | null
   #abortController: AbortController
   #fetchNext: StreamResponseConfig[`fetchNext`]
   #startSSE?: StreamResponseConfig[`startSSE`]
@@ -98,7 +84,9 @@ export class StreamResponseImpl<
   #closedReject!: (err: Error) => void
   #closed: Promise<void>
   #stopAfterUpToDate = false
-  #sseIterator: AsyncIterator<ByteChunk> | null = null
+
+  // Core primitive: a ReadableStream of Response objects
+  #responseStream: ReadableStream<Response>
 
   constructor(config: StreamResponseConfig) {
     this.url = config.url
@@ -110,7 +98,6 @@ export class StreamResponseImpl<
     this.upToDate = config.initialUpToDate
 
     this.#isJsonMode = config.isJsonMode
-    this.#firstResponse = config.firstResponse
     this.#abortController = config.abortController
     this.#fetchNext = config.fetchNext
     this.#startSSE = config.startSSE
@@ -119,6 +106,9 @@ export class StreamResponseImpl<
       this.#closedResolve = resolve
       this.#closedReject = reject
     })
+
+    // Create the core response stream
+    this.#responseStream = this.#createResponseStream(config.firstResponse)
   }
 
   // =================================
@@ -135,34 +125,12 @@ export class StreamResponseImpl<
     }
   }
 
-  #markConsuming(): void {
-    if (this.#state === SessionState.Consuming) {
-      throw new DurableStreamError(
-        `StreamResponse is already being consumed. Each response can only be consumed once.`,
-        `ALREADY_CONSUMED`
-      )
-    }
-    if (this.#state === SessionState.Closed) {
-      throw new DurableStreamError(
-        `StreamResponse has already been closed.`,
-        `ALREADY_CLOSED`
-      )
-    }
-    this.#state = SessionState.Consuming
-  }
-
   #markClosed(): void {
-    if (this.#state !== SessionState.Closed) {
-      this.#state = SessionState.Closed
-      this.#closedResolve()
-    }
+    this.#closedResolve()
   }
 
   #markError(err: Error): void {
-    if (this.#state !== SessionState.Closed) {
-      this.#state = SessionState.Closed
-      this.#closedReject(err)
-    }
+    this.#closedReject(err)
   }
 
   /**
@@ -187,82 +155,88 @@ export class StreamResponseImpl<
   }
 
   /**
-   * Consume the first response if available, returning null if already consumed.
+   * Create the core ReadableStream<Response> that yields responses.
+   * This is consumed once - all consumption methods use this same stream.
    */
-  #takeFirstResponse(): Response | null {
-    const response = this.#firstResponse
-    this.#firstResponse = null
-    return response
-  }
+  #createResponseStream(firstResponse: Response): ReadableStream<Response> {
+    let firstResponseYielded = false
 
-  /**
-   * Async generator that yields Response objects (first response + live updates).
-   * This is the core primitive for all consumption methods.
-   */
-  async *#generateResponses(): AsyncGenerator<Response, void, undefined> {
-    this.#markConsuming()
+    return new ReadableStream<Response>({
+      pull: async (controller) => {
+        try {
+          // First, yield the held first response
+          if (!firstResponseYielded) {
+            firstResponseYielded = true
+            controller.enqueue(firstResponse)
 
-    try {
-      // First, yield the held first response
-      const firstResponse = this.#takeFirstResponse()
-      if (firstResponse) {
-        yield firstResponse
+            // If upToDate and not continuing live, we're done
+            if (this.upToDate && !this.#shouldContinueLive()) {
+              this.#markClosed()
+              controller.close()
+              return
+            }
+            return
+          }
 
-        // If upToDate and not continuing live, we're done
-        if (this.upToDate && !this.#shouldContinueLive()) {
-          this.#markClosed()
-          return
-        }
-      }
+          // Continue with live updates if needed
+          if (this.#shouldContinueLive()) {
+            // Check if we should use SSE
+            if (this.live === `sse` && this.#startSSE) {
+              throw new DurableStreamError(
+                `SSE mode is not yet implemented`,
+                `SSE_NOT_SUPPORTED`
+              )
+            }
 
-      // Continue with live updates if needed
-      while (this.#shouldContinueLive()) {
-        // Check if we should use SSE
-        if (this.live === `sse` && this.#startSSE) {
-          if (!this.#sseIterator) {
-            this.#sseIterator = this.#startSSE(
+            // Use long-poll
+            if (this.#abortController.signal.aborted) {
+              this.#markClosed()
+              controller.close()
+              return
+            }
+
+            const response = await this.#fetchNext(
               this.offset,
               this.cursor,
               this.#abortController.signal
             )
+
+            this.#updateStateFromResponse(response)
+            controller.enqueue(response)
+
+            if (this.upToDate && !this.#shouldContinueLive()) {
+              this.#markClosed()
+              controller.close()
+            }
+            return
           }
 
-          // SSE mode yields ByteChunks directly, not Response objects
-          // So we need to handle this differently - for now, throw
-          throw new DurableStreamError(
-            `SSE mode is not yet implemented`,
-            `SSE_NOT_SUPPORTED`
-          )
+          // No more data
+          this.#markClosed()
+          controller.close()
+        } catch (err) {
+          if (this.#abortController.signal.aborted) {
+            this.#markClosed()
+            controller.close()
+          } else {
+            this.#markError(err instanceof Error ? err : new Error(String(err)))
+            controller.error(err)
+          }
         }
+      },
 
-        // Use long-poll
-        if (this.#abortController.signal.aborted) {
-          break
-        }
-
-        const response = await this.#fetchNext(
-          this.offset,
-          this.cursor,
-          this.#abortController.signal
-        )
-
-        this.#updateStateFromResponse(response)
-        yield response
-
-        if (this.upToDate && !this.#shouldContinueLive()) {
-          break
-        }
-      }
-
-      this.#markClosed()
-    } catch (err) {
-      if (this.#abortController.signal.aborted) {
+      cancel: () => {
+        this.#abortController.abort()
         this.#markClosed()
-      } else {
-        this.#markError(err instanceof Error ? err : new Error(String(err)))
-        throw err
-      }
-    }
+      },
+    })
+  }
+
+  /**
+   * Get the response stream reader. Can only be called once.
+   */
+  #getResponseReader(): ReadableStreamDefaultReader<Response> {
+    return this.#responseStream.getReader()
   }
 
   // =================================
@@ -270,53 +244,57 @@ export class StreamResponseImpl<
   // =================================
 
   async body(): Promise<Uint8Array> {
-    this.#markConsuming()
     this.#stopAfterUpToDate = true
-
+    const reader = this.#getResponseReader()
     const blobs: Array<Blob> = []
 
-    for await (const response of this.#generateResponses()) {
-      // Get blob directly - no copy needed
-      const blob = await response.blob()
-      if (blob.size > 0) {
-        blobs.push(blob)
+    try {
+      let result = await reader.read()
+      while (!result.done) {
+        const blob = await result.value.blob()
+        if (blob.size > 0) {
+          blobs.push(blob)
+        }
+        if (this.upToDate) break
+        result = await reader.read()
       }
-      if (this.upToDate) break
+    } finally {
+      reader.releaseLock()
     }
 
     this.#markClosed()
 
-    // No data
     if (blobs.length === 0) {
       return new Uint8Array(0)
     }
-
-    // Single blob - get arrayBuffer directly (no concatenation needed)
     if (blobs.length === 1) {
       return new Uint8Array(await blobs[0]!.arrayBuffer())
     }
 
-    // Multiple blobs - use Blob constructor to concatenate (no manual copying)
     const combined = new Blob(blobs)
     return new Uint8Array(await combined.arrayBuffer())
   }
 
   async json(): Promise<Array<TJson>> {
     this.#ensureJsonMode()
-    this.#markConsuming()
     this.#stopAfterUpToDate = true
-
+    const reader = this.#getResponseReader()
     const items: Array<TJson> = []
 
-    for await (const response of this.#generateResponses()) {
-      // Use the efficient json() method on Response
-      const parsed = (await response.json()) as TJson | Array<TJson>
-      if (Array.isArray(parsed)) {
-        items.push(...parsed)
-      } else {
-        items.push(parsed)
+    try {
+      let result = await reader.read()
+      while (!result.done) {
+        const parsed = (await result.value.json()) as TJson | Array<TJson>
+        if (Array.isArray(parsed)) {
+          items.push(...parsed)
+        } else {
+          items.push(parsed)
+        }
+        if (this.upToDate) break
+        result = await reader.read()
       }
-      if (this.upToDate) break
+    } finally {
+      reader.releaseLock()
     }
 
     this.#markClosed()
@@ -324,18 +302,22 @@ export class StreamResponseImpl<
   }
 
   async text(): Promise<string> {
-    this.#markConsuming()
     this.#stopAfterUpToDate = true
-
+    const reader = this.#getResponseReader()
     const parts: Array<string> = []
 
-    for await (const response of this.#generateResponses()) {
-      // Use the efficient text() method on Response
-      const text = await response.text()
-      if (text) {
-        parts.push(text)
+    try {
+      let result = await reader.read()
+      while (!result.done) {
+        const text = await result.value.text()
+        if (text) {
+          parts.push(text)
+        }
+        if (this.upToDate) break
+        result = await reader.read()
       }
-      if (this.upToDate) break
+    } finally {
+      reader.releaseLock()
     }
 
     this.#markClosed()
@@ -347,16 +329,15 @@ export class StreamResponseImpl<
   // =====================
 
   bodyStream(): ReadableStream<Uint8Array> {
-    this.#markConsuming()
-
     const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>()
+    const reader = this.#getResponseReader()
 
     const pipeBodyStream = async (): Promise<void> => {
       try {
-        for await (const response of this.#generateResponses()) {
-          const body = response.body
+        let result = await reader.read()
+        while (!result.done) {
+          const body = result.value.body
           if (body) {
-            // Pipe this response body, but don't close the writable yet
             await body.pipeTo(writable, {
               preventClose: true,
               preventAbort: true,
@@ -364,12 +345,11 @@ export class StreamResponseImpl<
             })
           }
 
-          // Check if we should stop after this response
           if (this.upToDate && !this.#shouldContinueLive()) {
             break
           }
+          result = await reader.read()
         }
-        // All responses piped, now close the writable
         await writable.close()
         this.#markClosed()
       } catch (err) {
@@ -388,6 +368,8 @@ export class StreamResponseImpl<
           }
           this.#markError(err instanceof Error ? err : new Error(String(err)))
         }
+      } finally {
+        reader.releaseLock()
       }
     }
 
@@ -398,13 +380,11 @@ export class StreamResponseImpl<
 
   jsonStream(): ReadableStream<TJson> {
     this.#ensureJsonMode()
-    this.#markConsuming()
-    const self = this
-    const responseGenerator = this.#generateResponses()
+    const reader = this.#getResponseReader()
     let pendingItems: Array<TJson> = []
 
     return new ReadableStream<TJson>({
-      async pull(controller) {
+      pull: async (controller) => {
         try {
           // If we have pending items, yield the next one
           const nextItem = pendingItems.shift()
@@ -414,14 +394,13 @@ export class StreamResponseImpl<
           }
 
           // Get next response and parse JSON
-          const { done, value: response } = await responseGenerator.next()
+          const { done, value: response } = await reader.read()
           if (done) {
-            self.#markClosed()
+            this.#markClosed()
             controller.close()
             return
           }
 
-          // Use the efficient json() method on Response
           const parsed = (await response.json()) as TJson | Array<TJson>
           if (Array.isArray(parsed)) {
             pendingItems = parsed
@@ -436,28 +415,27 @@ export class StreamResponseImpl<
           }
 
           // Check if we should stop
-          if (self.upToDate && !self.#shouldContinueLive()) {
-            // Drain remaining items first
+          if (this.upToDate && !this.#shouldContinueLive()) {
             if (pendingItems.length === 0) {
-              self.#markClosed()
+              this.#markClosed()
               controller.close()
             }
           }
         } catch (err) {
-          if (self.#abortController.signal.aborted) {
-            self.#markClosed()
+          if (this.#abortController.signal.aborted) {
+            this.#markClosed()
             controller.close()
           } else {
-            self.#markError(err instanceof Error ? err : new Error(String(err)))
+            this.#markError(err instanceof Error ? err : new Error(String(err)))
             controller.error(err)
           }
         }
       },
 
-      cancel() {
-        responseGenerator.return()
-        self.#abortController.abort()
-        self.#markClosed()
+      cancel: () => {
+        reader.releaseLock()
+        this.#abortController.abort()
+        this.#markClosed()
       },
     })
   }
@@ -489,14 +467,15 @@ export class StreamResponseImpl<
   ): () => void {
     this.#ensureJsonMode()
     const abortController = new AbortController()
+    const reader = this.#getResponseReader()
 
     const consumeJsonSubscription = async (): Promise<void> => {
       try {
-        for await (const response of this.#generateResponses()) {
+        let result = await reader.read()
+        while (!result.done) {
           if (abortController.signal.aborted) break
 
-          // Use the efficient json() method on Response
-          const parsed = (await response.json()) as TJson | Array<TJson>
+          const parsed = (await result.value.json()) as TJson | Array<TJson>
           const items = Array.isArray(parsed) ? parsed : [parsed]
 
           await subscriber({
@@ -505,10 +484,13 @@ export class StreamResponseImpl<
             cursor: this.cursor,
             upToDate: this.upToDate,
           })
+
+          result = await reader.read()
         }
       } catch (e) {
-        // Ignore errors after unsubscribe
         if (!abortController.signal.aborted) throw e
+      } finally {
+        reader.releaseLock()
       }
     }
 
@@ -522,13 +504,15 @@ export class StreamResponseImpl<
 
   subscribeBytes(subscriber: (chunk: ByteChunk) => Promise<void>): () => void {
     const abortController = new AbortController()
+    const reader = this.#getResponseReader()
 
     const consumeBytesSubscription = async (): Promise<void> => {
       try {
-        for await (const response of this.#generateResponses()) {
+        let result = await reader.read()
+        while (!result.done) {
           if (abortController.signal.aborted) break
 
-          const buffer = await response.arrayBuffer()
+          const buffer = await result.value.arrayBuffer()
 
           await subscriber({
             data: new Uint8Array(buffer),
@@ -536,9 +520,13 @@ export class StreamResponseImpl<
             cursor: this.cursor,
             upToDate: this.upToDate,
           })
+
+          result = await reader.read()
         }
       } catch (e) {
         if (!abortController.signal.aborted) throw e
+      } finally {
+        reader.releaseLock()
       }
     }
 
@@ -552,13 +540,15 @@ export class StreamResponseImpl<
 
   subscribeText(subscriber: (chunk: TextChunk) => Promise<void>): () => void {
     const abortController = new AbortController()
+    const reader = this.#getResponseReader()
 
     const consumeTextSubscription = async (): Promise<void> => {
       try {
-        for await (const response of this.#generateResponses()) {
+        let result = await reader.read()
+        while (!result.done) {
           if (abortController.signal.aborted) break
 
-          const text = await response.text()
+          const text = await result.value.text()
 
           await subscriber({
             text,
@@ -566,9 +556,13 @@ export class StreamResponseImpl<
             cursor: this.cursor,
             upToDate: this.upToDate,
           })
+
+          result = await reader.read()
         }
       } catch (e) {
         if (!abortController.signal.aborted) throw e
+      } finally {
+        reader.releaseLock()
       }
     }
 
@@ -586,9 +580,6 @@ export class StreamResponseImpl<
 
   cancel(reason?: unknown): void {
     this.#abortController.abort(reason)
-    if (this.#sseIterator?.return) {
-      this.#sseIterator.return()
-    }
     this.#markClosed()
   }
 
