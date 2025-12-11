@@ -19,6 +19,61 @@ export interface ConformanceTestOptions {
 }
 
 /**
+ * Helper to fetch SSE stream and read until a condition is met.
+ * Handles AbortController, timeout, and cleanup automatically.
+ */
+async function fetchSSE(
+  url: string,
+  opts: {
+    timeoutMs?: number
+    maxChunks?: number
+    untilContent?: string
+    headers?: Record<string, string>
+  } = {}
+): Promise<{ response: Response; received: string }> {
+  const { timeoutMs = 2000, maxChunks = 10, untilContent, headers = {} } = opts
+
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+
+  try {
+    const response = await fetch(url, {
+      method: `GET`,
+      headers,
+      signal: controller.signal,
+    })
+
+    if (!response.body) {
+      clearTimeout(timeoutId)
+      return { response, received: `` }
+    }
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let received = ``
+
+    for (let i = 0; i < maxChunks; i++) {
+      const { done, value } = await reader.read()
+      if (done) break
+      received += decoder.decode(value, { stream: true })
+      if (untilContent && received.includes(untilContent)) break
+    }
+
+    clearTimeout(timeoutId)
+    reader.cancel()
+
+    return { response, received }
+  } catch (e) {
+    clearTimeout(timeoutId)
+    if (e instanceof Error && e.name === `AbortError`) {
+      // Return empty result on timeout/abort
+      return { response: new Response(), received: `` }
+    }
+    throw e
+  }
+}
+
+/**
  * Run the full conformance test suite against a server
  */
 export function runConformanceTests(options: ConformanceTestOptions): void {
@@ -2418,43 +2473,14 @@ export function runConformanceTests(options: ConformanceTestOptions): void {
         body: `test data`,
       })
 
-      // SSE request with cursor should be accepted
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 1000)
+      const { response, received } = await fetchSSE(
+        `${getBaseUrl()}${streamPath}?offset=-1&live=sse&cursor=test-cursor-456`,
+        { untilContent: `Stream-Cursor` }
+      )
 
-      try {
-        const response = await fetch(
-          `${getBaseUrl()}${streamPath}?offset=-1&live=sse&cursor=test-cursor-456`,
-          {
-            method: `GET`,
-          }
-        )
-
-        clearTimeout(timeoutId)
-        expect(response.status).toBe(200)
-
-        // Read a bit and verify cursor is echoed in control event
-        const reader = response.body!.getReader()
-        const decoder = new TextDecoder()
-        let received = ``
-
-        for (let i = 0; i < 10; i++) {
-          const { done, value } = await reader.read()
-          if (done) break
-          received += decoder.decode(value, { stream: true })
-          if (received.includes(`Stream-Cursor`)) break
-        }
-
-        reader.cancel()
-
-        // Cursor should be echoed in control events
-        expect(received).toContain(`test-cursor-456`)
-      } catch (e) {
-        clearTimeout(timeoutId)
-        if (e instanceof Error && e.name !== `AbortError`) {
-          throw e
-        }
-      }
+      expect(response.status).toBe(200)
+      // Cursor should be echoed in control events
+      expect(received).toContain(`test-cursor-456`)
     })
 
     test(`should wrap JSON data in arrays for SSE and produce valid JSON`, async () => {
@@ -2467,57 +2493,26 @@ export function runConformanceTests(options: ConformanceTestOptions): void {
         body: JSON.stringify({ id: 1, message: `hello` }),
       })
 
-      // Make SSE request
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 2000)
+      const { response, received } = await fetchSSE(
+        `${getBaseUrl()}${streamPath}?offset=-1&live=sse`,
+        { untilContent: `event: data` }
+      )
 
-      try {
-        const response = await fetch(
-          `${getBaseUrl()}${streamPath}?offset=-1&live=sse`,
-          {
-            method: `GET`,
-            signal: controller.signal,
-          }
-        )
+      expect(response.status).toBe(200)
+      expect(received).toContain(`event: data`)
 
-        expect(response.status).toBe(200)
+      // Extract and parse the JSON payload to verify it's valid
+      const dataLine = received
+        .split(`\n`)
+        .find((l) => l.startsWith(`data: `) && l.includes(`[`))
+      expect(dataLine).toBeDefined()
 
-        // Read response
-        const reader = response.body!.getReader()
-        const decoder = new TextDecoder()
-        let received = ``
+      const payload = dataLine!.slice(`data: `.length)
+      // This will throw if JSON is invalid (e.g., trailing comma)
+      const parsed = JSON.parse(payload)
 
-        for (let i = 0; i < 10; i++) {
-          const { done, value } = await reader.read()
-          if (done) break
-          received += decoder.decode(value, { stream: true })
-          if (received.includes(`event: data`)) break
-        }
-
-        clearTimeout(timeoutId)
-        reader.cancel()
-
-        // JSON data should be wrapped in array brackets
-        expect(received).toContain(`event: data`)
-
-        // Extract and parse the JSON payload to verify it's valid
-        const dataLine = received
-          .split(`\n`)
-          .find((l) => l.startsWith(`data: `) && l.includes(`[`))
-        expect(dataLine).toBeDefined()
-
-        const payload = dataLine!.slice(`data: `.length)
-        // This will throw if JSON is invalid (e.g., trailing comma)
-        const parsed = JSON.parse(payload)
-
-        // Verify the structure matches what we sent
-        expect(parsed).toEqual([{ id: 1, message: `hello` }])
-      } catch (e) {
-        clearTimeout(timeoutId)
-        if (e instanceof Error && e.name !== `AbortError`) {
-          throw e
-        }
-      }
+      // Verify the structure matches what we sent
+      expect(parsed).toEqual([{ id: 1, message: `hello` }])
     })
 
     test(`should handle SSE for empty stream with correct offset`, async () => {
@@ -2643,53 +2638,19 @@ export function runConformanceTests(options: ConformanceTestOptions): void {
         body: `line1\nline2\nline3`,
       })
 
-      // Make SSE request
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 2000)
+      const { response, received } = await fetchSSE(
+        `${getBaseUrl()}${streamPath}?offset=-1&live=sse`,
+        { untilContent: `event: control` }
+      )
 
-      try {
-        const response = await fetch(
-          `${getBaseUrl()}${streamPath}?offset=-1&live=sse`,
-          {
-            method: `GET`,
-            signal: controller.signal,
-          }
-        )
+      expect(response.status).toBe(200)
+      expect(received).toContain(`event: data`)
 
-        expect(response.status).toBe(200)
-
-        // Read response
-        const reader = response.body!.getReader()
-        const decoder = new TextDecoder()
-        let received = ``
-
-        for (let i = 0; i < 10; i++) {
-          const { done, value } = await reader.read()
-          if (done) break
-          received += decoder.decode(value, { stream: true })
-          if (received.includes(`event: control`)) break
-        }
-
-        clearTimeout(timeoutId)
-        reader.cancel()
-
-        // The SSE data field should contain the text
-        // Note: SSE spec says newlines in data need multiple data: lines
-        // or the newlines become field separators
-        expect(received).toContain(`event: data`)
-
-        // At minimum, the original content should be recoverable
-        // (server may encode newlines as multiple data: lines per SSE spec)
-        const hasLine1 = received.includes(`line1`)
-        const hasLine2 = received.includes(`line2`)
-        const hasLine3 = received.includes(`line3`)
-        expect(hasLine1 && hasLine2 && hasLine3).toBe(true)
-      } catch (e) {
-        clearTimeout(timeoutId)
-        if (e instanceof Error && e.name !== `AbortError`) {
-          throw e
-        }
-      }
+      // Per SSE spec, multiline data must use multiple "data:" lines
+      // Each line should have its own data: prefix
+      expect(received).toContain(`data: line1`)
+      expect(received).toContain(`data: line2`)
+      expect(received).toContain(`data: line3`)
     })
 
     test(`should maintain monotonic offsets over multiple messages`, async () => {

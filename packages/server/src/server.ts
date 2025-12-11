@@ -22,6 +22,16 @@ const LIVE_QUERY_PARAM = `live`
 const CURSOR_QUERY_PARAM = `cursor`
 
 /**
+ * Encode data for SSE format.
+ * Per SSE spec, each line in the payload needs its own "data:" prefix.
+ * Newlines in the payload become separate data: lines.
+ */
+function encodeSSEData(payload: string): string {
+  const lines = payload.split(`\n`)
+  return lines.map((line) => `data: ${line}`).join(`\n`) + `\n\n`
+}
+
+/**
  * HTTP server for testing durable streams.
  * Supports both in-memory and file-backed storage modes.
  */
@@ -545,9 +555,10 @@ export class DurableStreamTestServer {
           dataPayload = decoder.decode(message.data)
         }
 
-        // Send data event
+        // Send data event - encode multiline payloads per SSE spec
+        // Each line in the payload needs its own "data:" prefix
         res.write(`event: data\n`)
-        res.write(`data: ${dataPayload}\n\n`)
+        res.write(encodeSSEData(dataPayload))
 
         currentOffset = message.offset
       }
@@ -565,7 +576,7 @@ export class DurableStreamTestServer {
       }
 
       res.write(`event: control\n`)
-      res.write(`data: ${JSON.stringify(controlData)}\n\n`)
+      res.write(encodeSSEData(JSON.stringify(controlData)))
 
       // Update currentOffset for next iteration (use controlOffset for consistency)
       currentOffset = controlOffset
@@ -591,7 +602,7 @@ export class DurableStreamTestServer {
             keepAliveData[STREAM_CURSOR_HEADER] = cursor
           }
           res.write(`event: control\n`)
-          res.write(`data: ${JSON.stringify(keepAliveData)}\n\n`)
+          res.write(encodeSSEData(JSON.stringify(keepAliveData)))
         }
         // Loop will continue and read new messages
       }
