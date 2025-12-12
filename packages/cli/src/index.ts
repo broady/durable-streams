@@ -86,15 +86,16 @@ async function readStream(streamId: string) {
     // Using live: "auto" for catch-up first, then auto-select live mode
     const res = await stream.stream({ live: `auto` })
 
-    // Use bodyStream for efficient piping
-    const reader = res.bodyStream().getReader()
-    let result = await reader.read()
-    while (!result.done) {
-      if (result.value.length > 0) {
-        stdout.write(result.value)
-      }
-      result = await reader.read()
-    }
+    // Use subscriber pattern for streaming to stdout
+    await new Promise<void>((resolve, reject) => {
+      res.subscribeBytes(async (chunk) => {
+        if (chunk.data.length > 0) {
+          stdout.write(chunk.data)
+        }
+      })
+
+      res.closed.then(resolve).catch(reject)
+    })
   } catch (error) {
     if (error instanceof Error) {
       stderr.write(`Error reading stream: ${error.message}\n`)
