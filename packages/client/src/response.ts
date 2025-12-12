@@ -308,6 +308,9 @@ export class StreamResponseImpl<
                 if (event.streamCursor) {
                   this.cursor = event.streamCursor
                 }
+                if (event.upToDate !== undefined) {
+                  this.upToDate = event.upToDate
+                }
                 // Continue to get next event (control events don't produce data)
                 continue
               }

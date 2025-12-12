@@ -3,7 +3,7 @@
  *
  * SSE format from protocol:
  * - `event: data` events contain the stream data
- * - `event: control` events contain `streamNextOffset` and optional `streamCursor`
+ * - `event: control` events contain `streamNextOffset` and optional `streamCursor` and `upToDate`
  */
 
 import type { Offset } from "./types"
@@ -20,6 +20,7 @@ export interface SSEControlEvent {
   type: `control`
   streamNextOffset: Offset
   streamCursor?: string
+  upToDate?: boolean
 }
 
 export type SSEEvent = SSEDataEvent | SSEControlEvent
@@ -67,11 +68,13 @@ export async function* parseSSEStream(
                 const control = JSON.parse(dataStr) as {
                   streamNextOffset: Offset
                   streamCursor?: string
+                  upToDate?: boolean
                 }
                 yield {
                   type: `control`,
                   streamNextOffset: control.streamNextOffset,
                   streamCursor: control.streamCursor,
+                  upToDate: control.upToDate,
                 }
               } catch {
                 // Invalid control event, skip
@@ -108,11 +111,13 @@ export async function* parseSSEStream(
           const control = JSON.parse(dataStr) as {
             streamNextOffset: Offset
             streamCursor?: string
+            upToDate?: boolean
           }
           yield {
             type: `control`,
             streamNextOffset: control.streamNextOffset,
             streamCursor: control.streamCursor,
+            upToDate: control.upToDate,
           }
         } catch {
           // Invalid control event, skip
