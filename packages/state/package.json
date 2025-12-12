@@ -20,18 +20,21 @@
   },
   "files": [
     "dist",
-    "src"
+    "src",
+    "state-protocol.schema.json",
+    "STATE-PROTOCOL.md"
   ],
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "sideEffects": false,
-  "dependencies": {},
-  "devDependencies": {
+  "dependencies": {
     "@durable-streams/client": "workspace:*",
-    "@durable-streams/server": "workspace:*",
     "@standard-schema/spec": "^1.0.0",
-    "@tanstack/db": "^0.0.1-alpha.77",
+    "@tanstack/db": "^0.5.11"
+  },
+  "devDependencies": {
+    "@durable-streams/server": "workspace:*",
     "tsdown": "^0.9.0"
   },
   "scripts": {

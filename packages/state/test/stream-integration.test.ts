@@ -52,7 +52,8 @@ describe(`Stream Integration`, () => {
 
     // Read back and materialize
     const state = new MaterializedState()
-    const events = (await (await stream.stream()).json()) as Array<ChangeEvent>
+    const res = await stream.stream<ChangeEvent>({ live: false })
+    const events = await res.json()
 
     for (const event of events) {
       state.apply(event)
@@ -89,10 +90,9 @@ describe(`Stream Integration`, () => {
     // Stream and materialize one at a time
     const state = new MaterializedState()
 
-    for await (const event of (
-      await stream.stream({ live: false })
-    ).jsonStream()) {
-      state.apply(event as ChangeEvent)
+    const res = await stream.stream<ChangeEvent>({ live: false })
+    for await (const event of res.jsonStream()) {
+      state.apply(event)
     }
 
     // Verify
@@ -140,7 +140,8 @@ describe(`Stream Integration`, () => {
 
     // Read and materialize
     const state = new MaterializedState()
-    const events = (await (await stream.stream()).json()) as Array<ChangeEvent>
+    const res = await stream.stream<ChangeEvent>({ live: false })
+    const events = await res.json()
 
     for (const event of events) {
       state.apply(event)
@@ -193,7 +194,8 @@ describe(`Stream Integration`, () => {
 
     // Read and materialize
     const state = new MaterializedState()
-    const events = (await (await stream.stream()).json()) as Array<ChangeEvent>
+    const res = await stream.stream<ChangeEvent>({ live: false })
+    const events = await res.json()
 
     for (const event of events) {
       state.apply(event)
@@ -232,16 +234,15 @@ describe(`Stream Integration`, () => {
 
     // Read and materialize initial state
     const state = new MaterializedState()
-    const initialEvents = (await (
-      await stream.stream()
-    ).json()) as Array<ChangeEvent>
+    const initialRes = await stream.stream<ChangeEvent>({ live: false })
+    const initialEvents = await initialRes.json()
 
     for (const event of initialEvents) {
       state.apply(event)
     }
 
     // Save the offset
-    const savedOffset = stream.offset
+    const savedOffset = initialRes.offset
 
     expect(state.get(`config`, `theme`)).toBe(`dark`)
     expect(state.get(`config`, `language`)).toBe(`en`)
@@ -263,13 +264,12 @@ describe(`Stream Integration`, () => {
     })
 
     // Resume from saved offset and materialize new events
-    for await (const event of (
-      await stream.stream({
-        offset: savedOffset,
-        live: false,
-      })
-    ).jsonStream()) {
-      state.apply(event as ChangeEvent)
+    const resumeRes = await stream.stream<ChangeEvent>({
+      offset: savedOffset,
+      live: false,
+    })
+    for await (const event of resumeRes.jsonStream()) {
+      state.apply(event)
     }
 
     // Verify updated state
