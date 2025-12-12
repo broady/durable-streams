@@ -3,32 +3,31 @@
  * Ported from Electric SQL client patterns
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import { stream } from "../src/stream-api"
 import { FetchError } from "../src/error"
 
-describe("onError handler", () => {
+describe(`onError handler`, () => {
   let mockFetch: ReturnType<typeof vi.fn>
 
   beforeEach(() => {
     mockFetch = vi.fn()
   })
 
-  it("should retry on error if error handler returns empty object", async () => {
-    let attempt = 0
+  it(`should retry on error if error handler returns empty object`, async () => {
     mockFetch
       .mockResolvedValueOnce(
         new Response(null, {
           status: 401,
-          statusText: "Unauthorized",
+          statusText: `Unauthorized`,
         })
       )
       .mockResolvedValueOnce(
         new Response(JSON.stringify([]), {
           status: 200,
           headers: {
-            "content-type": "application/json",
-            "Stream-Next-Offset": "1",
+            "content-type": `application/json`,
+            "Stream-Next-Offset": `1`,
           },
         })
       )
@@ -36,9 +35,9 @@ describe("onError handler", () => {
     const onError = vi.fn().mockResolvedValue({})
 
     const res = await stream({
-      url: "https://example.com/stream",
+      url: `https://example.com/stream`,
       fetchClient: mockFetch,
-      headers: { Authorization: "Bearer initial-token" },
+      headers: { Authorization: `Bearer initial-token` },
       backoffOptions: { maxRetries: 0 }, // Disable backoff retries
       onError,
     })
@@ -46,35 +45,35 @@ describe("onError handler", () => {
     expect(onError).toHaveBeenCalledOnce()
     expect(onError).toHaveBeenCalledWith(expect.any(FetchError))
     expect(mockFetch).toHaveBeenCalledTimes(2)
-    expect(res.url).toBe("https://example.com/stream")
+    expect(res.url).toBe(`https://example.com/stream`)
   })
 
-  it("should retry with modified headers from error handler", async () => {
+  it(`should retry with modified headers from error handler`, async () => {
     mockFetch
       .mockResolvedValueOnce(
         new Response(null, {
           status: 401,
-          statusText: "Unauthorized",
+          statusText: `Unauthorized`,
         })
       )
       .mockResolvedValueOnce(
         new Response(JSON.stringify([]), {
           status: 200,
           headers: {
-            "content-type": "application/json",
-            "Stream-Next-Offset": "1",
+            "content-type": `application/json`,
+            "Stream-Next-Offset": `1`,
           },
         })
       )
 
     const onError = vi.fn().mockResolvedValue({
-      headers: { Authorization: "Bearer refreshed-token" },
+      headers: { Authorization: `Bearer refreshed-token` },
     })
 
     await stream({
-      url: "https://example.com/stream",
+      url: `https://example.com/stream`,
       fetchClient: mockFetch,
-      headers: { Authorization: "Bearer expired-token" },
+      headers: { Authorization: `Bearer expired-token` },
       backoffOptions: { maxRetries: 0 },
       onError,
     })
@@ -85,36 +84,36 @@ describe("onError handler", () => {
     // Second call should have refreshed token
     const secondCall = mockFetch.mock.calls[1]
     expect(secondCall[1].headers).toMatchObject({
-      Authorization: "Bearer refreshed-token",
+      Authorization: `Bearer refreshed-token`,
     })
   })
 
-  it("should retry with modified params from error handler", async () => {
+  it(`should retry with modified params from error handler`, async () => {
     mockFetch
       .mockResolvedValueOnce(
         new Response(null, {
           status: 400,
-          statusText: "Bad Request",
+          statusText: `Bad Request`,
         })
       )
       .mockResolvedValueOnce(
         new Response(JSON.stringify([]), {
           status: 200,
           headers: {
-            "content-type": "application/json",
-            "Stream-Next-Offset": "1",
+            "content-type": `application/json`,
+            "Stream-Next-Offset": `1`,
           },
         })
       )
 
     const onError = vi.fn().mockResolvedValue({
-      params: { tenant: "valid-tenant" },
+      params: { tenant: `valid-tenant` },
     })
 
     await stream({
-      url: "https://example.com/stream",
+      url: `https://example.com/stream`,
       fetchClient: mockFetch,
-      params: { tenant: "invalid-tenant" },
+      params: { tenant: `invalid-tenant` },
       backoffOptions: { maxRetries: 0 },
       onError,
     })
@@ -125,37 +124,37 @@ describe("onError handler", () => {
     // Second call should have updated param
     const firstUrl = new URL(mockFetch.mock.calls[0][0])
     const secondUrl = new URL(mockFetch.mock.calls[1][0])
-    expect(firstUrl.searchParams.get("tenant")).toBe("invalid-tenant")
-    expect(secondUrl.searchParams.get("tenant")).toBe("valid-tenant")
+    expect(firstUrl.searchParams.get(`tenant`)).toBe(`invalid-tenant`)
+    expect(secondUrl.searchParams.get(`tenant`)).toBe(`valid-tenant`)
   })
 
-  it("should preserve headers when onError returns only params", async () => {
+  it(`should preserve headers when onError returns only params`, async () => {
     mockFetch
       .mockResolvedValueOnce(
         new Response(null, {
           status: 400,
-          statusText: "Bad Request",
+          statusText: `Bad Request`,
         })
       )
       .mockResolvedValueOnce(
         new Response(JSON.stringify([]), {
           status: 200,
           headers: {
-            "content-type": "application/json",
-            "Stream-Next-Offset": "1",
+            "content-type": `application/json`,
+            "Stream-Next-Offset": `1`,
           },
         })
       )
 
     const onError = vi.fn().mockResolvedValue({
-      params: { fix: "applied" },
+      params: { fix: `applied` },
     })
 
     await stream({
-      url: "https://example.com/stream",
+      url: `https://example.com/stream`,
       fetchClient: mockFetch,
-      headers: { "X-Custom-Header": "should-be-preserved" },
-      params: { tenant: "abc" },
+      headers: { "X-Custom-Header": `should-be-preserved` },
+      params: { tenant: `abc` },
       backoffOptions: { maxRetries: 0 },
       onError,
     })
@@ -164,40 +163,40 @@ describe("onError handler", () => {
 
     // Both calls should have the custom header
     expect(mockFetch.mock.calls[0][1].headers).toMatchObject({
-      "X-Custom-Header": "should-be-preserved",
+      "X-Custom-Header": `should-be-preserved`,
     })
     expect(mockFetch.mock.calls[1][1].headers).toMatchObject({
-      "X-Custom-Header": "should-be-preserved",
+      "X-Custom-Header": `should-be-preserved`,
     })
   })
 
-  it("should preserve params when onError returns only headers", async () => {
+  it(`should preserve params when onError returns only headers`, async () => {
     mockFetch
       .mockResolvedValueOnce(
         new Response(null, {
           status: 401,
-          statusText: "Unauthorized",
+          statusText: `Unauthorized`,
         })
       )
       .mockResolvedValueOnce(
         new Response(JSON.stringify([]), {
           status: 200,
           headers: {
-            "content-type": "application/json",
-            "Stream-Next-Offset": "1",
+            "content-type": `application/json`,
+            "Stream-Next-Offset": `1`,
           },
         })
       )
 
     const onError = vi.fn().mockResolvedValue({
-      headers: { Authorization: "Bearer new-token" },
+      headers: { Authorization: `Bearer new-token` },
     })
 
     await stream({
-      url: "https://example.com/stream",
+      url: `https://example.com/stream`,
       fetchClient: mockFetch,
-      headers: { Authorization: "Bearer old-token" },
-      params: { tenant: "abc", important: "param" },
+      headers: { Authorization: `Bearer old-token` },
+      params: { tenant: `abc`, important: `param` },
       backoffOptions: { maxRetries: 0 },
       onError,
     })
@@ -207,17 +206,17 @@ describe("onError handler", () => {
     // Both calls should have the params
     const firstUrl = new URL(mockFetch.mock.calls[0][0])
     const secondUrl = new URL(mockFetch.mock.calls[1][0])
-    expect(firstUrl.searchParams.get("tenant")).toBe("abc")
-    expect(firstUrl.searchParams.get("important")).toBe("param")
-    expect(secondUrl.searchParams.get("tenant")).toBe("abc")
-    expect(secondUrl.searchParams.get("important")).toBe("param")
+    expect(firstUrl.searchParams.get(`tenant`)).toBe(`abc`)
+    expect(firstUrl.searchParams.get(`important`)).toBe(`param`)
+    expect(secondUrl.searchParams.get(`tenant`)).toBe(`abc`)
+    expect(secondUrl.searchParams.get(`important`)).toBe(`param`)
   })
 
-  it("should stop retrying if error handler returns void", async () => {
+  it(`should stop retrying if error handler returns void`, async () => {
     mockFetch.mockResolvedValue(
       new Response(null, {
         status: 401,
-        statusText: "Unauthorized",
+        statusText: `Unauthorized`,
       })
     )
 
@@ -225,7 +224,7 @@ describe("onError handler", () => {
 
     await expect(
       stream({
-        url: "https://example.com/stream",
+        url: `https://example.com/stream`,
         fetchClient: mockFetch,
         backoffOptions: { maxRetries: 0 },
         onError,
@@ -236,27 +235,27 @@ describe("onError handler", () => {
     expect(mockFetch).toHaveBeenCalledOnce()
   })
 
-  it("should support async error handler", async () => {
+  it(`should support async error handler`, async () => {
     mockFetch
       .mockResolvedValueOnce(
         new Response(null, {
           status: 401,
-          statusText: "Unauthorized",
+          statusText: `Unauthorized`,
         })
       )
       .mockResolvedValueOnce(
         new Response(JSON.stringify([]), {
           status: 200,
           headers: {
-            "content-type": "application/json",
-            "Stream-Next-Offset": "1",
+            "content-type": `application/json`,
+            "Stream-Next-Offset": `1`,
           },
         })
       )
 
     const refreshToken = async () => {
       await new Promise((resolve) => setTimeout(resolve, 10))
-      return "Bearer fresh-token"
+      return `Bearer fresh-token`
     }
 
     const onError = vi.fn().mockImplementation(async () => {
@@ -265,9 +264,9 @@ describe("onError handler", () => {
     })
 
     await stream({
-      url: "https://example.com/stream",
+      url: `https://example.com/stream`,
       fetchClient: mockFetch,
-      headers: { Authorization: "Bearer stale-token" },
+      headers: { Authorization: `Bearer stale-token` },
       backoffOptions: { maxRetries: 0 },
       onError,
     })
@@ -275,17 +274,17 @@ describe("onError handler", () => {
     expect(onError).toHaveBeenCalledOnce()
     expect(mockFetch).toHaveBeenCalledTimes(2)
     expect(mockFetch.mock.calls[1][1].headers).toMatchObject({
-      Authorization: "Bearer fresh-token",
+      Authorization: `Bearer fresh-token`,
     })
   })
 
-  it("should not call onError if no error occurs", async () => {
+  it(`should not call onError if no error occurs`, async () => {
     mockFetch.mockResolvedValue(
       new Response(JSON.stringify([]), {
         status: 200,
         headers: {
-          "content-type": "application/json",
-          "Stream-Next-Offset": "1",
+          "content-type": `application/json`,
+          "Stream-Next-Offset": `1`,
         },
       })
     )
@@ -293,7 +292,7 @@ describe("onError handler", () => {
     const onError = vi.fn()
 
     await stream({
-      url: "https://example.com/stream",
+      url: `https://example.com/stream`,
       fetchClient: mockFetch,
       onError,
     })
@@ -302,17 +301,17 @@ describe("onError handler", () => {
     expect(mockFetch).toHaveBeenCalledOnce()
   })
 
-  it("should propagate error if no onError handler provided", async () => {
+  it(`should propagate error if no onError handler provided`, async () => {
     mockFetch.mockResolvedValue(
       new Response(null, {
         status: 401,
-        statusText: "Unauthorized",
+        statusText: `Unauthorized`,
       })
     )
 
     await expect(
       stream({
-        url: "https://example.com/stream",
+        url: `https://example.com/stream`,
         fetchClient: mockFetch,
         backoffOptions: { maxRetries: 0 },
       })
@@ -321,7 +320,7 @@ describe("onError handler", () => {
     expect(mockFetch).toHaveBeenCalledOnce()
   })
 
-  it("should call onError for 4xx client errors", async () => {
+  it(`should call onError for 4xx client errors`, async () => {
     const statuses = [400, 401, 403, 404]
 
     for (const status of statuses) {
@@ -331,13 +330,13 @@ describe("onError handler", () => {
       mockFetch.mockResolvedValue(
         new Response(null, {
           status,
-          statusText: "Client Error",
+          statusText: `Client Error`,
         })
       )
 
       await expect(
         stream({
-          url: "https://example.com/stream",
+          url: `https://example.com/stream`,
           fetchClient: mockFetch,
           backoffOptions: { maxRetries: 0 },
           onError,
@@ -348,74 +347,74 @@ describe("onError handler", () => {
     }
   })
 
-  it("should merge returned params with existing ones", async () => {
+  it(`should merge returned params with existing ones`, async () => {
     mockFetch
       .mockResolvedValueOnce(
         new Response(null, {
           status: 400,
-          statusText: "Bad Request",
+          statusText: `Bad Request`,
         })
       )
       .mockResolvedValueOnce(
         new Response(JSON.stringify([]), {
           status: 200,
           headers: {
-            "content-type": "application/json",
-            "Stream-Next-Offset": "1",
+            "content-type": `application/json`,
+            "Stream-Next-Offset": `1`,
           },
         })
       )
 
     const onError = vi.fn().mockResolvedValue({
-      params: { override: "new-value" },
+      params: { override: `new-value` },
     })
 
     await stream({
-      url: "https://example.com/stream",
+      url: `https://example.com/stream`,
       fetchClient: mockFetch,
-      params: { override: "old-value", keep: "this" },
+      params: { override: `old-value`, keep: `this` },
       backoffOptions: { maxRetries: 0 },
       onError,
     })
 
     const secondUrl = new URL(mockFetch.mock.calls[1][0])
-    expect(secondUrl.searchParams.get("override")).toBe("new-value")
-    expect(secondUrl.searchParams.get("keep")).toBe("this")
+    expect(secondUrl.searchParams.get(`override`)).toBe(`new-value`)
+    expect(secondUrl.searchParams.get(`keep`)).toBe(`this`)
   })
 
-  it("should merge returned headers with existing ones", async () => {
+  it(`should merge returned headers with existing ones`, async () => {
     mockFetch
       .mockResolvedValueOnce(
         new Response(null, {
           status: 401,
-          statusText: "Unauthorized",
+          statusText: `Unauthorized`,
         })
       )
       .mockResolvedValueOnce(
         new Response(JSON.stringify([]), {
           status: 200,
           headers: {
-            "content-type": "application/json",
-            "Stream-Next-Offset": "1",
+            "content-type": `application/json`,
+            "Stream-Next-Offset": `1`,
           },
         })
       )
 
     const onError = vi.fn().mockResolvedValue({
-      headers: { Authorization: "Bearer new" },
+      headers: { Authorization: `Bearer new` },
     })
 
     await stream({
-      url: "https://example.com/stream",
+      url: `https://example.com/stream`,
       fetchClient: mockFetch,
-      headers: { Authorization: "Bearer old", "X-Keep": "this" },
+      headers: { Authorization: `Bearer old`, "X-Keep": `this` },
       backoffOptions: { maxRetries: 0 },
       onError,
     })
 
     expect(mockFetch.mock.calls[1][1].headers).toMatchObject({
-      Authorization: "Bearer new",
-      "X-Keep": "this",
+      Authorization: `Bearer new`,
+      "X-Keep": `this`,
     })
   })
 })
