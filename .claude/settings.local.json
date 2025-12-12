@@ -35,7 +35,9 @@
       "Bash(flyctl status:*)",
       "Bash(flyctl logs:*)",
       "Bash(pnpm --filter @durable-streams/state typecheck)",
-      "Bash(pnpm --filter @durable-streams/state build:*)"
+      "Bash(pnpm --filter @durable-streams/state build:*)",
+      "Bash(git fetch:*)",
+      "Bash(git merge:*)"
     ],
     "deny": [],
     "ask": []
