@@ -12,7 +12,7 @@ import {
   STREAM_UP_TO_DATE_HEADER,
 } from "./constants"
 import { parseSSEStream } from "./sse"
-import type { SSEEvent } from "./sse"
+import type { SSEControlEvent, SSEEvent } from "./sse"
 import type {
   ByteChunk,
   StreamResponse as IStreamResponse,
@@ -241,6 +241,187 @@ export class StreamResponseImpl<
   }
 
   /**
+   * Create a synthetic Response from SSE data with proper headers.
+   * Includes offset/cursor/upToDate in headers so subscribers can read them.
+   */
+  #createSSESyntheticResponse(
+    data: string,
+    offset: Offset,
+    cursor: string | undefined,
+    upToDate: boolean
+  ): Response {
+    const headers: Record<string, string> = {
+      "content-type": this.contentType ?? `application/json`,
+      [STREAM_OFFSET_HEADER]: String(offset),
+    }
+    if (cursor) {
+      headers[STREAM_CURSOR_HEADER] = cursor
+    }
+    if (upToDate) {
+      headers[STREAM_UP_TO_DATE_HEADER] = `true`
+    }
+    return new Response(data, { status: 200, headers })
+  }
+
+  /**
+   * Update instance state from an SSE control event.
+   */
+  #updateStateFromSSEControl(controlEvent: SSEControlEvent): void {
+    this.offset = controlEvent.streamNextOffset
+    if (controlEvent.streamCursor) {
+      this.cursor = controlEvent.streamCursor
+    }
+    if (controlEvent.upToDate !== undefined) {
+      this.upToDate = controlEvent.upToDate
+    }
+  }
+
+  /**
+   * Try to reconnect SSE and return the new iterator, or null if reconnection
+   * is not possible or fails.
+   */
+  async #trySSEReconnect(): Promise<AsyncGenerator<
+    SSEEvent,
+    void,
+    undefined
+  > | null> {
+    if (!this.#shouldContinueLive() || !this.#startSSE) {
+      return null
+    }
+    const newSSEResponse = await this.#startSSE(
+      this.offset,
+      this.cursor,
+      this.#abortController.signal
+    )
+    if (newSSEResponse.body) {
+      return parseSSEStream(newSSEResponse.body, this.#abortController.signal)
+    }
+    return null
+  }
+
+  /**
+   * Process SSE events from the iterator.
+   * Returns an object indicating the result:
+   * - { type: 'response', response, newIterator? } - yield this response
+   * - { type: 'closed' } - stream should be closed
+   * - { type: 'error', error } - an error occurred
+   * - { type: 'continue', newIterator? } - continue processing (control-only event)
+   */
+  async #processSSEEvents(
+    sseEventIterator: AsyncGenerator<SSEEvent, void, undefined>
+  ): Promise<
+    | {
+        type: `response`
+        response: Response
+        newIterator?: AsyncGenerator<SSEEvent, void, undefined>
+      }
+    | { type: `closed` }
+    | { type: `error`; error: Error }
+    | {
+        type: `continue`
+        newIterator?: AsyncGenerator<SSEEvent, void, undefined>
+      }
+  > {
+    const { done, value: event } = await sseEventIterator.next()
+
+    if (done) {
+      // SSE stream ended - try to reconnect
+      try {
+        const newIterator = await this.#trySSEReconnect()
+        if (newIterator) {
+          return { type: `continue`, newIterator }
+        }
+      } catch (err) {
+        return {
+          type: `error`,
+          error:
+            err instanceof Error ? err : new Error(`SSE reconnection failed`),
+        }
+      }
+      return { type: `closed` }
+    }
+
+    if (event.type === `data`) {
+      // Wait for the subsequent control event to get correct offset/cursor/upToDate
+      return this.#processSSEDataEvent(event.data, sseEventIterator)
+    }
+
+    // Control event without preceding data - update state and continue
+    this.#updateStateFromSSEControl(event)
+    return { type: `continue` }
+  }
+
+  /**
+   * Process an SSE data event by waiting for its corresponding control event.
+   * In SSE protocol, control events come AFTER data events.
+   */
+  async #processSSEDataEvent(
+    pendingData: string,
+    sseEventIterator: AsyncGenerator<SSEEvent, void, undefined>
+  ): Promise<
+    | {
+        type: `response`
+        response: Response
+        newIterator?: AsyncGenerator<SSEEvent, void, undefined>
+      }
+    | { type: `error`; error: Error }
+  > {
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+    while (true) {
+      const { done: controlDone, value: controlEvent } =
+        await sseEventIterator.next()
+
+      if (controlDone) {
+        // Stream ended without control event - yield data with current state
+        const response = this.#createSSESyntheticResponse(
+          pendingData,
+          this.offset,
+          this.cursor,
+          this.upToDate
+        )
+
+        // Try to reconnect
+        try {
+          const newIterator = await this.#trySSEReconnect()
+          return {
+            type: `response`,
+            response,
+            newIterator: newIterator ?? undefined,
+          }
+        } catch (err) {
+          return {
+            type: `error`,
+            error:
+              err instanceof Error ? err : new Error(`SSE reconnection failed`),
+          }
+        }
+      }
+
+      if (controlEvent.type === `control`) {
+        // Update state and create response with correct metadata
+        this.#updateStateFromSSEControl(controlEvent)
+        const response = this.#createSSESyntheticResponse(
+          pendingData,
+          controlEvent.streamNextOffset,
+          controlEvent.streamCursor,
+          controlEvent.upToDate ?? false
+        )
+        return { type: `response`, response }
+      }
+
+      // Got another data event before control - yield current data with current state
+      // (This is unexpected but we handle it gracefully)
+      const response = this.#createSSESyntheticResponse(
+        pendingData,
+        this.offset,
+        this.cursor,
+        this.upToDate
+      )
+      return { type: `response`, response }
+    }
+  }
+
+  /**
    * Create the core ReadableStream<Response> that yields responses.
    * This is consumed once - all consumption methods use this same stream.
    *
@@ -292,174 +473,32 @@ export class StreamResponseImpl<
             // Keep reading events until we get data or stream ends
             // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
             while (true) {
-              // Read next SSE event
-              const { done, value: event } = await sseEventIterator.next()
+              const result = await this.#processSSEEvents(sseEventIterator)
 
-              if (done) {
-                // SSE stream ended - server may have closed after ~60s
-                // Try to reconnect if we should continue live
-                if (this.#shouldContinueLive() && this.#startSSE) {
-                  try {
-                    const newSSEResponse = await this.#startSSE(
-                      this.offset,
-                      this.cursor,
-                      this.#abortController.signal
-                    )
-                    if (newSSEResponse.body) {
-                      sseEventIterator = parseSSEStream(
-                        newSSEResponse.body,
-                        this.#abortController.signal
-                      )
-                      // Continue reading from new stream
-                      continue
-                    }
-                  } catch (err) {
-                    // If reconnect fails, surface the error
-                    this.#markError(
-                      err instanceof Error
-                        ? err
-                        : new Error(`SSE reconnection failed`)
-                    )
-                    controller.error(
-                      err instanceof Error
-                        ? err
-                        : new Error(`SSE reconnection failed`)
-                    )
-                    return
+              switch (result.type) {
+                case `response`:
+                  if (result.newIterator) {
+                    sseEventIterator = result.newIterator
                   }
-                }
-                this.#markClosed()
-                controller.close()
-                return
-              }
-
-              if (event.type === `data`) {
-                // In SSE mode, control events come AFTER data events in the protocol.
-                // We must wait for the subsequent control event to get the correct
-                // offset/cursor/upToDate values BEFORE yielding the data Response.
-                // We include these values in the Response headers so subscribers can
-                // read them from the Response itself, not from `this` which may be
-                // updated by subsequent pull() calls before the subscriber runs.
-                const pendingData = event.data
-
-                // Read until we get the control event
-                // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-                while (true) {
-                  const { done: controlDone, value: controlEvent } =
-                    await sseEventIterator.next()
-
-                  if (controlDone) {
-                    // Stream ended without control event - yield data with current state
-                    // Include current offset/cursor in headers for subscribers
-                    const headers: Record<string, string> = {
-                      "content-type": this.contentType ?? `application/json`,
-                      [STREAM_OFFSET_HEADER]: String(this.offset),
-                    }
-                    if (this.cursor) {
-                      headers[STREAM_CURSOR_HEADER] = this.cursor
-                    }
-                    if (this.upToDate) {
-                      headers[STREAM_UP_TO_DATE_HEADER] = `true`
-                    }
-                    const syntheticResponse = new Response(pendingData, {
-                      status: 200,
-                      headers,
-                    })
-                    controller.enqueue(syntheticResponse)
-
-                    // Try to reconnect if we should continue live
-                    if (this.#shouldContinueLive() && this.#startSSE) {
-                      try {
-                        const newSSEResponse = await this.#startSSE(
-                          this.offset,
-                          this.cursor,
-                          this.#abortController.signal
-                        )
-                        if (newSSEResponse.body) {
-                          sseEventIterator = parseSSEStream(
-                            newSSEResponse.body,
-                            this.#abortController.signal
-                          )
-                        }
-                      } catch (err) {
-                        this.#markError(
-                          err instanceof Error
-                            ? err
-                            : new Error(`SSE reconnection failed`)
-                        )
-                        controller.error(
-                          err instanceof Error
-                            ? err
-                            : new Error(`SSE reconnection failed`)
-                        )
-                      }
-                    }
-                    return
-                  }
-
-                  if (controlEvent.type === `control`) {
-                    // Update instance state from control event
-                    this.offset = controlEvent.streamNextOffset
-                    if (controlEvent.streamCursor) {
-                      this.cursor = controlEvent.streamCursor
-                    }
-                    if (controlEvent.upToDate !== undefined) {
-                      this.upToDate = controlEvent.upToDate
-                    }
-
-                    // Create synthetic Response with headers containing the offset/cursor
-                    // Subscribers read from these headers to get correct values
-                    const headers: Record<string, string> = {
-                      "content-type": this.contentType ?? `application/json`,
-                      [STREAM_OFFSET_HEADER]: controlEvent.streamNextOffset,
-                    }
-                    if (controlEvent.streamCursor) {
-                      headers[STREAM_CURSOR_HEADER] = controlEvent.streamCursor
-                    }
-                    if (controlEvent.upToDate) {
-                      headers[STREAM_UP_TO_DATE_HEADER] = `true`
-                    }
-                    const syntheticResponse = new Response(pendingData, {
-                      status: 200,
-                      headers,
-                    })
-                    controller.enqueue(syntheticResponse)
-                    return
-                  }
-
-                  // If we get another data event before control, something is wrong
-                  // but we should handle it gracefully - yield current data with
-                  // current state in headers (controlEvent.type must be `data` here)
-                  const headers: Record<string, string> = {
-                    "content-type": this.contentType ?? `application/json`,
-                    [STREAM_OFFSET_HEADER]: String(this.offset),
-                  }
-                  if (this.cursor) {
-                    headers[STREAM_CURSOR_HEADER] = this.cursor
-                  }
-                  if (this.upToDate) {
-                    headers[STREAM_UP_TO_DATE_HEADER] = `true`
-                  }
-                  const syntheticResponse = new Response(pendingData, {
-                    status: 200,
-                    headers,
-                  })
-                  controller.enqueue(syntheticResponse)
+                  controller.enqueue(result.response)
                   return
-                }
-              }
 
-              // event.type === `control` without preceding data (e.g., initial state)
-              // Update offset and cursor from control event
-              this.offset = event.streamNextOffset
-              if (event.streamCursor) {
-                this.cursor = event.streamCursor
+                case `closed`:
+                  this.#markClosed()
+                  controller.close()
+                  return
+
+                case `error`:
+                  this.#markError(result.error)
+                  controller.error(result.error)
+                  return
+
+                case `continue`:
+                  if (result.newIterator) {
+                    sseEventIterator = result.newIterator
+                  }
+                  continue
               }
-              if (event.upToDate !== undefined) {
-                this.upToDate = event.upToDate
-              }
-              // Continue to get next event (standalone control events don't produce data)
-              continue
             }
           }
 
