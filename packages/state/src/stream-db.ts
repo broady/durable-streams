@@ -253,10 +253,9 @@ class EventDispatcher {
         this.isUpToDate = false
         break
 
-      case `up-to-date`:
       case `snapshot-start`:
       case `snapshot-end`:
-        // These are hints - up-to-date is handled via batch.upToDate
+        // These are hints for snapshot boundaries
         break
     }
   }

@@ -55,7 +55,7 @@ The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "S
 
 **Change Message**: A message representing a state mutation (insert, update, or delete operation) on an entity identified by type and key.
 
-**Control Message**: A message for stream management (up-to-date signals, snapshot boundaries, resets) separate from data changes.
+**Control Message**: A message for stream management (snapshot boundaries, resets) separate from data changes.
 
 **Entity Type**: A discriminator field in change messages that routes events to the correct collection or handler. Enables multi-type streams where different entity types coexist.
 
@@ -184,28 +184,13 @@ Control messages provide stream management signals separate from data changes. T
 
 The `headers` object **MUST** contain:
 
-- `control` (string): One of `"up-to-date"`, `"snapshot-start"`, `"snapshot-end"`, or `"reset"`
+- `control` (string): One of `"snapshot-start"`, `"snapshot-end"`, or `"reset"`
 
 The `headers` object **MAY** contain:
 
 - `offset` (string): Stream offset associated with the control event
 
-#### 4.2.1. Up-to-Date Control
-
-The `up-to-date` control message indicates that a client has caught up with all available data in the stream. Servers **MAY** emit this message, and clients **MAY** use it to transition from catch-up mode to live tailing mode.
-
-**Example:**
-
-```json
-{
-  "headers": {
-    "control": "up-to-date",
-    "offset": "123456_789"
-  }
-}
-```
-
-#### 4.2.2. Snapshot Boundaries
+#### 4.2.1. Snapshot Boundaries
 
 The `snapshot-start` and `snapshot-end` control messages delimit snapshot boundaries. Servers **MAY** emit these to indicate that a sequence of change messages represents a complete snapshot of state at a point in time.
 
@@ -229,7 +214,7 @@ The `snapshot-start` and `snapshot-end` control messages delimit snapshot bounda
 }
 ```
 
-#### 4.2.3. Reset Control
+#### 4.2.2. Reset Control
 
 The `reset` control message signals that clients **SHOULD** clear their materialized state and restart from the indicated offset. This enables servers to signal state resets or schema migrations.
 
@@ -281,7 +266,7 @@ Control messages **MUST** be valid JSON objects with the following structure:
 ```json
 {
   "headers": {
-    "control": "up-to-date" | "snapshot-start" | "snapshot-end" | "reset",
+    "control": "snapshot-start" | "snapshot-end" | "reset",
     "offset": "<stream-offset>"  // optional
   }
 }
@@ -289,7 +274,7 @@ Control messages **MUST** be valid JSON objects with the following structure:
 
 **Field Requirements:**
 
-- `headers.control`: **MUST** be one of `"up-to-date"`, `"snapshot-start"`, `"snapshot-end"`, or `"reset"`
+- `headers.control`: **MUST** be one of `"snapshot-start"`, `"snapshot-end"`, or `"reset"`
 - `headers.offset`: **MAY** be present; if present, **MUST** be a valid stream offset string
 
 ## 6. State Materialization

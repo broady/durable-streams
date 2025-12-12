@@ -49,7 +49,7 @@ export type ChangeEvent<T = unknown> = {
  */
 export type ControlEvent = {
   headers: {
-    control: `up-to-date` | `snapshot-start` | `snapshot-end` | `reset`
+    control: `snapshot-start` | `snapshot-end` | `reset`
     offset?: string
   }
 }

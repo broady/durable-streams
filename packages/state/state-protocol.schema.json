@@ -103,8 +103,8 @@
       "properties": {
         "control": {
           "type": "string",
-          "enum": ["up-to-date", "snapshot-start", "snapshot-end", "reset"],
-          "description": "Control event type. 'up-to-date' indicates the client has caught up, 'snapshot-start' and 'snapshot-end' delimit snapshot boundaries, 'reset' signals a state reset"
+          "enum": ["snapshot-start", "snapshot-end", "reset"],
+          "description": "Control event type. 'snapshot-start' and 'snapshot-end' delimit snapshot boundaries, 'reset' signals a state reset"
         },
         "offset": {
           "type": "string",
@@ -121,7 +121,7 @@
     },
     "ControlType": {
       "type": "string",
-      "enum": ["up-to-date", "snapshot-start", "snapshot-end", "reset"],
+      "enum": ["snapshot-start", "snapshot-end", "reset"],
       "description": "Control event type"
     },
     "Value": {
