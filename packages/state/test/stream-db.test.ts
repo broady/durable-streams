@@ -684,9 +684,9 @@ describe(`State Schema Event Helpers`, () => {
       },
     })
 
-    const insertEvent = stateSchema.collections.users.insert(`123`, {
-      name: `Kyle`,
-      email: `kyle@example.com`,
+    const insertEvent = stateSchema.collections.users.insert({
+      key: `123`,
+      value: { name: `Kyle`, email: `kyle@example.com` },
     })
 
     expect(insertEvent).toEqual({
@@ -707,11 +707,11 @@ describe(`State Schema Event Helpers`, () => {
       },
     })
 
-    const updateEvent = stateSchema.collections.users.update(
-      `123`,
-      { name: `Kyle M`, email: `kyle@example.com` },
-      { name: `Kyle`, email: `kyle@example.com` }
-    )
+    const updateEvent = stateSchema.collections.users.update({
+      key: `123`,
+      value: { name: `Kyle M`, email: `kyle@example.com` },
+      oldValue: { name: `Kyle`, email: `kyle@example.com` },
+    })
 
     expect(updateEvent).toEqual({
       type: `user`,
@@ -732,9 +732,9 @@ describe(`State Schema Event Helpers`, () => {
       },
     })
 
-    const updateEvent = stateSchema.collections.users.update(`123`, {
-      name: `Kyle M`,
-      email: `kyle@example.com`,
+    const updateEvent = stateSchema.collections.users.update({
+      key: `123`,
+      value: { name: `Kyle M`, email: `kyle@example.com` },
     })
 
     expect(updateEvent).toEqual({
@@ -756,9 +756,9 @@ describe(`State Schema Event Helpers`, () => {
       },
     })
 
-    const deleteEvent = stateSchema.collections.users.delete(`123`, {
-      name: `Kyle`,
-      email: `kyle@example.com`,
+    const deleteEvent = stateSchema.collections.users.delete({
+      key: `123`,
+      oldValue: { name: `Kyle`, email: `kyle@example.com` },
     })
 
     expect(deleteEvent).toEqual({
@@ -779,7 +779,9 @@ describe(`State Schema Event Helpers`, () => {
       },
     })
 
-    const deleteEvent = stateSchema.collections.users.delete(`123`)
+    const deleteEvent = stateSchema.collections.users.delete({
+      key: `123`,
+    })
 
     expect(deleteEvent).toEqual({
       type: `user`,
@@ -803,16 +805,49 @@ describe(`State Schema Event Helpers`, () => {
       },
     })
 
-    const userEvent = stateSchema.collections.users.insert(`1`, {
-      name: `Kyle`,
-      email: `kyle@example.com`,
+    const userEvent = stateSchema.collections.users.insert({
+      key: `1`,
+      value: { name: `Kyle`, email: `kyle@example.com` },
     })
-    const messageEvent = stateSchema.collections.messages.insert(`msg1`, {
-      text: `Hello`,
-      userId: `1`,
+    const messageEvent = stateSchema.collections.messages.insert({
+      key: `msg1`,
+      value: { text: `Hello`, userId: `1` },
     })
 
     expect(userEvent.type).toBe(`user`)
     expect(messageEvent.type).toBe(`message`)
+  })
+
+  it(`should support custom headers including txid and timestamp`, () => {
+    const stateSchema = createStateSchema({
+      collections: {
+        users: {
+          schema: userSchema,
+          type: `user`,
+        },
+      },
+    })
+
+    const insertEvent = stateSchema.collections.users.insert({
+      key: `123`,
+      value: { name: `Kyle`, email: `kyle@example.com` },
+      headers: {
+        txid: `tx-001`,
+        timestamp: `2025-01-15T12:00:00Z`,
+        sourceApp: `web-app`,
+      },
+    })
+
+    expect(insertEvent).toEqual({
+      type: `user`,
+      key: `123`,
+      value: { name: `Kyle`, email: `kyle@example.com` },
+      headers: {
+        operation: `insert`,
+        txid: `tx-001`,
+        timestamp: `2025-01-15T12:00:00Z`,
+        sourceApp: `web-app`,
+      },
+    })
   })
 })

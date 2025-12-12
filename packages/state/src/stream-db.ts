@@ -26,15 +26,28 @@ export interface CollectionEventHelpers<T> {
   /**
    * Create an insert change event
    */
-  insert: (key: string, value: T) => ChangeEvent<T>
+  insert: (params: {
+    key: string
+    value: T
+    headers?: Omit<Record<string, string>, `operation`>
+  }) => ChangeEvent<T>
   /**
    * Create an update change event
    */
-  update: (key: string, value: T, oldValue?: T) => ChangeEvent<T>
+  update: (params: {
+    key: string
+    value: T
+    oldValue?: T
+    headers?: Omit<Record<string, string>, `operation`>
+  }) => ChangeEvent<T>
   /**
    * Create a delete change event
    */
-  delete: (key: string, oldValue?: T) => ChangeEvent<T>
+  delete: (params: {
+    key: string
+    oldValue?: T
+    headers?: Omit<Record<string, string>, `operation`>
+  }) => ChangeEvent<T>
 }
 
 /**
@@ -360,24 +373,24 @@ function createCollectionHelpers<T>(
   eventType: string
 ): CollectionEventHelpers<T> {
   return {
-    insert: (key: string, value: T): ChangeEvent<T> => ({
+    insert: ({ key, value, headers }): ChangeEvent<T> => ({
       type: eventType,
       key,
       value,
-      headers: { operation: `insert` },
+      headers: { operation: `insert`, ...headers },
     }),
-    update: (key: string, value: T, oldValue?: T): ChangeEvent<T> => ({
+    update: ({ key, value, oldValue, headers }): ChangeEvent<T> => ({
       type: eventType,
       key,
       value,
       old_value: oldValue,
-      headers: { operation: `update` },
+      headers: { operation: `update`, ...headers },
     }),
-    delete: (key: string, oldValue?: T): ChangeEvent<T> => ({
+    delete: ({ key, oldValue, headers }): ChangeEvent<T> => ({
       type: eventType,
       key,
       old_value: oldValue,
-      headers: { operation: `delete` },
+      headers: { operation: `delete`, ...headers },
     }),
   }
 }
@@ -434,9 +447,9 @@ export function createStateSchema<
  * })
  *
  * // Create change events using schema helpers
- * const insertEvent = stateSchema.collections.users.insert("123", {
- *   name: "Kyle",
- *   email: "kyle@example.com"
+ * const insertEvent = stateSchema.collections.users.insert({
+ *   key: "123",
+ *   value: { name: "Kyle", email: "kyle@example.com" }
  * })
  * await stream.append(insertEvent)
  *
