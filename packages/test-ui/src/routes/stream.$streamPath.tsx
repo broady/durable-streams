@@ -2,12 +2,14 @@ import { createFileRoute, redirect } from "@tanstack/react-router"
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
 } from "react"
 import { DurableStream } from "@durable-streams/client"
 import { and, eq, gt, useLiveQuery } from "@tanstack/react-db"
+import { useVirtualizer } from "@tanstack/react-virtual"
 import ReactJson from "react-json-view"
 import { useStreamDB } from "../lib/stream-db-context"
 import { useTypingIndicator } from "../hooks/useTypingIndicator"
@@ -45,6 +47,7 @@ function StreamViewer() {
   const [writeInput, setWriteInput] = useState(``)
   const [error, setError] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const parentRef = useRef<HTMLDivElement>(null)
   const [now, setNow] = useState(Date.now())
 
   // Subscribe to stream messages via external store
@@ -64,6 +67,23 @@ function StreamViewer() {
   const isRegistryStream =
     streamPath === `__registry__` || streamPath === `__presence__`
   const isJsonStream = contentType?.includes(`application/json`)
+
+  // Flatten messages into individual JSON items for virtualization
+  const flatItems = useMemo(() => {
+    if (!isJsonStream) return []
+    return messages.flatMap((msg) => {
+      const parsedMessages = JSON.parse(msg.data)
+      return parsedMessages
+    })
+  }, [messages, isJsonStream])
+
+  // Set up virtualizer for JSON streams
+  const virtualizer = useVirtualizer({
+    count: flatItems.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => 100, // Estimate item height
+    overscan: 5, // Render 5 items outside viewport
+  })
 
   // Custom theme matching app colors
   const jsonTheme = {
@@ -108,9 +128,17 @@ function StreamViewer() {
     [streamPath, now]
   )
 
+  // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: `smooth` })
-  }, [messages])
+    if (isJsonStream && flatItems.length > 0) {
+      // Defer scroll to avoid flushSync warning
+      queueMicrotask(() => {
+        virtualizer.scrollToIndex(flatItems.length - 1, { align: `end` })
+      })
+    } else if (!isJsonStream) {
+      messagesEndRef.current?.scrollIntoView({ behavior: `smooth` })
+    }
+  }, [messages, isJsonStream, flatItems.length, virtualizer])
 
   const writeToStream = async () => {
     if (!writeInput.trim()) return
@@ -135,7 +163,7 @@ function StreamViewer() {
           </span>
         )}
       </div>
-      <div className="messages">
+      <div className="messages" ref={parentRef}>
         {messages.length === 0 && (
           <div
             style={{
@@ -153,21 +181,39 @@ function StreamViewer() {
         )}
         {messages.length !== 0 ? (
           isJsonStream ? (
-            messages.flatMap((msg, i) => {
-              const parsedMessages = JSON.parse(msg.data)
-              return parsedMessages.map((item, j) => (
-                <div key={`${i}-${j}`} className="message json-message">
-                  <ReactJson
-                    src={item}
-                    collapsed={1}
-                    name={false}
-                    displayDataTypes={false}
-                    enableClipboard={false}
-                    theme={jsonTheme}
-                  />
+            <div
+              style={{
+                height: `${virtualizer.getTotalSize()}px`,
+                width: `100%`,
+                position: `relative`,
+              }}
+            >
+              {virtualizer.getVirtualItems().map((virtualItem) => (
+                <div
+                  key={virtualItem.key}
+                  data-index={virtualItem.index}
+                  ref={virtualizer.measureElement}
+                  style={{
+                    position: `absolute`,
+                    top: 0,
+                    left: 0,
+                    width: `100%`,
+                    transform: `translateY(${virtualItem.start}px)`,
+                  }}
+                >
+                  <div className="message json-message">
+                    <ReactJson
+                      src={flatItems[virtualItem.index]}
+                      collapsed={1}
+                      name={false}
+                      displayDataTypes={false}
+                      enableClipboard={false}
+                      theme={jsonTheme}
+                    />
+                  </div>
                 </div>
-              ))
-            })
+              ))}
+            </div>
           ) : (
             <div className="message">
               <pre>{messages.map((msg) => msg.data).join(``)}</pre>
