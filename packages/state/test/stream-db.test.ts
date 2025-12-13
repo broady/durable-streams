@@ -538,6 +538,105 @@ describe(`Stream DB`, () => {
     db.close()
   })
 
+  it(`should emit changes via subscribeChanges for preload and live updates`, async () => {
+    // Setup schema and stream
+    const streamState = createStateSchema({
+      collections: {
+        users: { schema: userSchema, type: `user` },
+      },
+    })
+
+    const stream = await DurableStream.create({
+      url: `${baseUrl}/db/subscribe-changes-${Date.now()}`,
+      contentType: `application/json`,
+    })
+
+    // Append initial events (before StreamDB creation)
+    await stream.append(
+      streamState.collections.users.insert({
+        key: `1`,
+        value: { name: `Kyle`, email: `kyle@example.com` },
+      })
+    )
+
+    await stream.append(
+      streamState.collections.users.insert({
+        key: `2`,
+        value: { name: `Sarah`, email: `sarah@example.com` },
+      })
+    )
+
+    // Create StreamDB
+    const db = await createStreamDB({ stream, state: streamState })
+
+    // Subscribe to changes BEFORE preload
+    const allChanges: Array<any> = []
+    const subscription = db.users.subscribeChanges((changes) => {
+      allChanges.push(...changes)
+    })
+
+    // Preload to get initial data
+    await db.preload()
+
+    // Verify initial inserts were received
+    expect(allChanges.length).toBe(2)
+    expect(allChanges[0]).toEqual({
+      key: `1`,
+      type: `insert`,
+      value: { name: `Kyle`, email: `kyle@example.com` },
+    })
+    expect(allChanges[1]).toEqual({
+      key: `2`,
+      type: `insert`,
+      value: { name: `Sarah`, email: `sarah@example.com` },
+    })
+
+    // Clear changes array for live update testing
+    allChanges.length = 0
+
+    // Append live update
+    await stream.append(
+      streamState.collections.users.update({
+        key: `1`,
+        value: { name: `Kyle Updated`, email: `kyle@example.com` },
+        oldValue: { name: `Kyle`, email: `kyle@example.com` },
+      })
+    )
+
+    // Wait for live update
+    await new Promise((resolve) => setTimeout(resolve, 100))
+
+    // Verify update was received
+    expect(allChanges.length).toBe(1)
+    expect(allChanges[0]).toEqual({
+      key: `1`,
+      type: `update`,
+      value: { name: `Kyle Updated`, email: `kyle@example.com` },
+      previousValue: { name: `Kyle`, email: `kyle@example.com` },
+    })
+
+    // Test delete
+    allChanges.length = 0
+    await stream.append(
+      streamState.collections.users.delete({
+        key: `2`,
+      })
+    )
+
+    await new Promise((resolve) => setTimeout(resolve, 100))
+
+    expect(allChanges.length).toBe(1)
+    expect(allChanges[0]).toEqual({
+      key: `2`,
+      type: `delete`,
+      value: { name: `Sarah`, email: `sarah@example.com` },
+    })
+
+    // Cleanup
+    subscription.unsubscribe()
+    db.close()
+  })
+
   it(`should commit live updates in batches`, async () => {
     const streamState = createStateSchema({
       collections: {

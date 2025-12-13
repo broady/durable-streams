@@ -65,7 +65,8 @@ export type StateEvent<T = unknown> = ChangeEvent<T> | ControlEvent
 export function isChangeEvent<T = unknown>(
   event: StateEvent<T>
 ): event is ChangeEvent<T> {
-  return `operation` in event.headers
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+  return event != null && `operation` in event.headers
 }
 
 /**
@@ -74,5 +75,6 @@ export function isChangeEvent<T = unknown>(
 export function isControlEvent<T = unknown>(
   event: StateEvent<T>
 ): event is ControlEvent {
-  return `control` in event.headers
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+  return event != null && `control` in event.headers
 }

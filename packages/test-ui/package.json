@@ -17,6 +17,8 @@
   },
   "dependencies": {
     "@durable-streams/client": "workspace:^",
+    "@durable-streams/state": "workspace:^",
+    "@tanstack/react-db": "latest",
     "@tanstack/react-router": "^1.139.14",
     "@tanstack/router-devtools": "^1.139.15",
     "@tanstack/router-plugin": "^1.139.14",

@@ -128,31 +128,23 @@ export interface StreamDBMethods {
 // ============================================================================
 
 /**
- * Symbol used to store the key on value objects.
- * Symbols don't appear in Object.keys() or JSON.stringify(),
- * keeping the returned values clean.
+ * WeakMap to associate value objects with their keys.
+ * Using WeakMap allows values to be garbage collected when no longer referenced.
  */
-const KEY_SYMBOL = Symbol.for(`durable-streams:key`)
+const valueToKey = new WeakMap<object, string>()
 
 /**
- * Value object with embedded key via Symbol
- */
-interface ValueWithKey {
-  [KEY_SYMBOL]?: string
-}
-
-/**
- * Store a key on a value object using Symbol
+ * Store a key for a value object
  */
 function setValueKey(value: object, key: string): void {
-  ;(value as ValueWithKey)[KEY_SYMBOL] = key
+  valueToKey.set(value, key)
 }
 
 /**
  * Get the key from a value object
  */
 function getValueKey(value: object): string {
-  const key = (value as ValueWithKey)[KEY_SYMBOL]
+  const key = valueToKey.get(value)
   if (key === undefined) {
     throw new Error(`No key found for value - this should not happen`)
   }
@@ -213,7 +205,7 @@ class EventDispatcher {
 
     const operation = event.headers.operation
 
-    // Validate that values are objects (required for KEY_SYMBOL storage)
+    // Validate that values are objects (required for key tracking)
     if (operation !== `delete`) {
       if (typeof event.value !== `object` || event.value === null) {
         throw new Error(
@@ -223,9 +215,12 @@ class EventDispatcher {
     }
 
     // Get value, ensuring it's an object
-    const value = (event.value ?? {}) as object
+    const originalValue = (event.value ?? {}) as object
 
-    // Store the key on the value so getKey can retrieve it
+    // Create a shallow copy to avoid mutating the original
+    const value = { ...originalValue }
+
+    // Store the key association for this value copy
     setValueKey(value, event.key)
 
     // Begin transaction on first write to this handler

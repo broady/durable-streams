@@ -1,6 +1,9 @@
 import { createFileRoute, redirect } from "@tanstack/react-router"
 import { useEffect, useRef, useState } from "react"
 import { DurableStream } from "@durable-streams/client"
+import { and, eq, gt, useLiveQuery } from "@tanstack/react-db"
+import { useStreamDB } from "../lib/stream-db-context"
+import { useTypingIndicator } from "../hooks/useTypingIndicator"
 
 const SERVER_URL = `http://${typeof window !== `undefined` ? window.location.hostname : `localhost`}:8787`
 
@@ -29,6 +32,8 @@ export const Route = createFileRoute(`/stream/$streamPath`)({
 function StreamViewer() {
   const { streamPath } = Route.useParams()
   const { contentType, stream } = Route.useLoaderData()
+  const { presenceDB } = useStreamDB()
+  const { startTyping } = useTypingIndicator(streamPath)
   const [messages, setMessages] = useState<
     Array<{ offset: string; data: string }>
   >([])
@@ -36,9 +41,34 @@ function StreamViewer() {
   const [error, setError] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
+  const [now, setNow] = useState(Date.now())
 
-  const isRegistryStream = streamPath === `__registry__`
+  const isRegistryStream =
+    streamPath === `__registry__` || streamPath === `__presence__`
   const isJsonStream = contentType?.includes(`application/json`)
+
+  // Update "now" every 5 seconds to re-evaluate stale typing indicators
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setNow(Date.now())
+    }, 5000)
+    return () => clearInterval(interval)
+  }, [])
+
+  // Query typing users for this stream
+  const { data: typers = [] } = useLiveQuery(
+    (q) =>
+      q
+        .from({ presence: presenceDB.presence })
+        .where(({ presence }) =>
+          and(
+            eq(presence.streamPath, streamPath),
+            eq(presence.isTyping, true),
+            gt(presence.lastSeen, now - 60000)
+          )
+        ),
+    [streamPath, now]
+  )
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: `smooth` })
@@ -97,6 +127,11 @@ function StreamViewer() {
       {error && <div className="error">{error}</div>}
       <div className="header">
         <h2>{streamPath}</h2>
+        {typers.length > 0 && (
+          <span className="typing-indicator">
+            {typers.map((t) => t.userId.slice(0, 8)).join(`, `)} typing...
+          </span>
+        )}
       </div>
       <div className="messages">
         {messages.length === 0 && (
@@ -134,7 +169,10 @@ function StreamViewer() {
           <textarea
             placeholder="Type your message (Shift+Enter for new line)..."
             value={writeInput}
-            onChange={(e) => setWriteInput(e.target.value)}
+            onChange={(e) => {
+              setWriteInput(e.target.value)
+              startTyping()
+            }}
             onKeyPress={(e) => {
               if (e.key === `Enter` && !e.shiftKey) {
                 e.preventDefault()

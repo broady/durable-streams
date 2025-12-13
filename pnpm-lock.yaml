@@ -144,6 +144,9 @@ importers:
       '@durable-streams/client':
         specifier: workspace:*
         version: link:../client
+      '@durable-streams/state':
+        specifier: workspace:*
+        version: link:../state
       '@neophi/sieve-cache':
         specifier: ^1.0.0
         version: 1.5.0
@@ -191,6 +194,12 @@ importers:
       '@durable-streams/client':
         specifier: workspace:^
         version: link:../client
+      '@durable-streams/state':
+        specifier: workspace:^
+        version: link:../state
+      '@tanstack/react-db':
+        specifier: latest
+        version: 0.1.56(react@19.2.1)(typescript@5.9.3)
       '@tanstack/react-router':
         specifier: ^1.139.14
         version: 1.140.0(react-dom@19.2.1(react@19.2.1))(react@19.2.1)
@@ -1381,6 +1390,11 @@ packages:
   '@tanstack/publish-config@0.2.2':
     resolution: {integrity: sha512-hTW2rLeZLBMmpwVzWmUJ5L50hPlf4Ea74rZtecbT6qQYCT16JEAbryfHm1u07KIICI2vEArsm2YguckjODqx0w==}
     engines: {node: '>=18'}
+
+  '@tanstack/react-db@0.1.56':
+    resolution: {integrity: sha512-7vfwx3tD6tgcUBu6tzpYVMFuYUGzYX7GHw8AtsW/P24eBhr7RR/dyF2ucoUGW6TZzdm8/bN/ql+8ftAV3iFsfA==}
+    peerDependencies:
+      react: '>=16.8.0'
 
   '@tanstack/react-router-devtools@1.140.0':
     resolution: {integrity: sha512-11NFwHCG8KphG7Bif570qOxBVwNBTkIOExsf42WNv7cgRhwD6cHjUvfx20/WzkAlvFbEGlV+pp7wiJm3HR56bQ==}
@@ -4721,6 +4735,14 @@ snapshots:
       simple-git: 3.30.0
     transitivePeerDependencies:
       - supports-color
+
+  '@tanstack/react-db@0.1.56(react@19.2.1)(typescript@5.9.3)':
+    dependencies:
+      '@tanstack/db': 0.5.12(typescript@5.9.3)
+      react: 19.2.1
+      use-sync-external-store: 1.6.0(react@19.2.1)
+    transitivePeerDependencies:
+      - typescript
 
   '@tanstack/react-router-devtools@1.140.0(@tanstack/react-router@1.140.0(react-dom@19.2.1(react@19.2.1))(react@19.2.1))(@tanstack/router-core@1.140.0)(csstype@3.2.3)(react-dom@19.2.1(react@19.2.1))(react@19.2.1)(solid-js@1.9.10)':
     dependencies:

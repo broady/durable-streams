@@ -23,4 +23,6 @@ export type {
   StreamStateDefinition,
   StateSchema,
   CreateStreamDBOptions,
+  StreamDB,
+  StreamDBMethods,
 } from "./stream-db"
