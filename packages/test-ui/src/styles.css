@@ -375,6 +375,24 @@ body {
   color: var(--text-primary);
 }
 
+/* ============================================================================
+   JSON Viewer Styling
+   ============================================================================ */
+
+.json-message {
+  padding: 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  overflow-x: auto;
+}
+
+.json-message .react-json-view {
+  font-family: "Recursive", monospace;
+  font-size: 13px !important;
+  line-height: 1.6;
+}
+
 .write-section {
   padding: 14px 20px;
   background: var(--bg-elevated);

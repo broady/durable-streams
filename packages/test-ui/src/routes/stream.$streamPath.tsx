@@ -1,9 +1,17 @@
 import { createFileRoute, redirect } from "@tanstack/react-router"
-import { useEffect, useRef, useState } from "react"
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react"
 import { DurableStream } from "@durable-streams/client"
 import { and, eq, gt, useLiveQuery } from "@tanstack/react-db"
+import ReactJson from "react-json-view"
 import { useStreamDB } from "../lib/stream-db-context"
 import { useTypingIndicator } from "../hooks/useTypingIndicator"
+import { streamStore } from "../lib/stream-store"
 
 const SERVER_URL = `http://${typeof window !== `undefined` ? window.location.hostname : `localhost`}:8787`
 
@@ -34,18 +42,48 @@ function StreamViewer() {
   const { contentType, stream } = Route.useLoaderData()
   const { presenceDB } = useStreamDB()
   const { startTyping } = useTypingIndicator(streamPath)
-  const [messages, setMessages] = useState<
-    Array<{ offset: string; data: string }>
-  >([])
   const [writeInput, setWriteInput] = useState(``)
   const [error, setError] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  const abortControllerRef = useRef<AbortController | null>(null)
   const [now, setNow] = useState(Date.now())
+
+  // Subscribe to stream messages via external store
+  const subscribe = useCallback(
+    (callback: () => void) =>
+      streamStore.subscribe(streamPath, stream, callback),
+    [streamPath, stream]
+  )
+
+  const getSnapshot = useCallback(
+    () => streamStore.getMessages(streamPath),
+    [streamPath]
+  )
+
+  const messages = useSyncExternalStore(subscribe, getSnapshot)
 
   const isRegistryStream =
     streamPath === `__registry__` || streamPath === `__presence__`
   const isJsonStream = contentType?.includes(`application/json`)
+
+  // Custom theme matching app colors
+  const jsonTheme = {
+    base00: `#ffffff`, // bg-card
+    base01: `#f5f1e8`, // bg-main
+    base02: `#e5dfd5`, // border-subtle
+    base03: `#6b5d54`, // text-dim (comments)
+    base04: `#4a4543`, // text-secondary
+    base05: `#2d2a28`, // text-primary (default text)
+    base06: `#2d2a28`, // text-primary
+    base07: `#2d2a28`, // text-primary
+    base08: `#d4704b`, // accent-primary (null, undefined, regex)
+    base09: `#c8886d`, // accent-warm (numbers, booleans)
+    base0A: `#7a9a7e`, // accent-secondary (functions)
+    base0B: `#d4704b`, // accent-primary (strings)
+    base0C: `#7a9a7e`, // accent-secondary (dates)
+    base0D: `#4a4543`, // text-secondary (keys)
+    base0E: `#c8886d`, // accent-warm (keywords)
+    base0F: `#d4704b`, // accent-primary (deprecation)
+  }
 
   // Update "now" every 5 seconds to re-evaluate stale typing indicators
   useEffect(() => {
@@ -73,42 +111,6 @@ function StreamViewer() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: `smooth` })
   }, [messages])
-
-  useEffect(() => {
-    const controller = new AbortController()
-    abortControllerRef.current = controller
-    setMessages([])
-    setError(null)
-
-    const followStream = async () => {
-      try {
-        const response = await stream.stream({
-          offset: `-1`,
-          live: `long-poll`,
-          signal: controller.signal,
-        })
-        response.subscribeText(async (chunk) => {
-          if (chunk.text !== ``) {
-            setMessages((prev) => [
-              ...prev,
-              { offset: chunk.offset, data: chunk.text },
-            ])
-          }
-        })
-      } catch (err: any) {
-        if (err.name !== `AbortError`) {
-          setError(`Failed to follow stream: ${err.message}`)
-        }
-      }
-    }
-
-    void followStream()
-
-    return () => {
-      controller.abort()
-      abortControllerRef.current = null
-    }
-  }, [streamPath])
 
   const writeToStream = async () => {
     if (!writeInput.trim()) return
@@ -151,11 +153,21 @@ function StreamViewer() {
         )}
         {messages.length !== 0 ? (
           isJsonStream ? (
-            messages.map((msg, i) => (
-              <div key={i} className="message">
-                <pre>{msg.data}</pre>
-              </div>
-            ))
+            messages.flatMap((msg, i) => {
+              const parsedMessages = JSON.parse(msg.data)
+              return parsedMessages.map((item, j) => (
+                <div key={`${i}-${j}`} className="message json-message">
+                  <ReactJson
+                    src={item}
+                    collapsed={1}
+                    name={false}
+                    displayDataTypes={false}
+                    enableClipboard={false}
+                    theme={jsonTheme}
+                  />
+                </div>
+              ))
+            })
           ) : (
             <div className="message">
               <pre>{messages.map((msg) => msg.data).join(``)}</pre>
