@@ -3047,7 +3047,7 @@ export function runConformanceTests(options: ConformanceTestOptions): void {
                   const response = await fetch(`${getBaseUrl()}${streamPath}`, {
                     method: `POST`,
                     headers: { "Content-Type": `application/octet-stream` },
-                    body: op.data,
+                    body: op.data as BodyInit,
                   })
                   expect([200, 204]).toContain(response.status)
 
@@ -3250,8 +3250,6 @@ export function runConformanceTests(options: ConformanceTestOptions): void {
 
               // Read and save the offset after initial data
               const initialRead = await fetch(`${getBaseUrl()}${streamPath}`)
-              const _initialOffset =
-                initialRead.headers.get(STREAM_OFFSET_HEADER)
               const initialBuffer = await initialRead.arrayBuffer()
               const initialResult = new Uint8Array(initialBuffer)
 
