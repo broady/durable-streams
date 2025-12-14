@@ -935,6 +935,82 @@ describe(`DurableStream.stream() method`, () => {
     })
   })
 
+  describe(`204 No Content handling in long-poll`, () => {
+    it(`should skip 204 and continue polling until data arrives`, async () => {
+      // 204 No Content indicates long-poll timeout with no new data.
+      // Previously this caused SyntaxError when json() tried to parse empty body.
+      mockFetch
+        .mockResolvedValueOnce(
+          new Response(null, {
+            status: 204,
+            headers: { [STREAM_OFFSET_HEADER]: `0` },
+          })
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify([{ id: 1 }]), {
+            status: 200,
+            headers: {
+              "content-type": `application/json`,
+              [STREAM_OFFSET_HEADER]: `1_10`,
+              [STREAM_UP_TO_DATE_HEADER]: `true`,
+            },
+          })
+        )
+
+      const res = await stream<{ id: number }>({
+        url: `https://example.com/stream`,
+        fetch: mockFetch,
+        live: `long-poll`,
+        json: true,
+      })
+
+      const items = await res.json()
+
+      expect(mockFetch).toHaveBeenCalledTimes(2)
+      expect(items).toEqual([{ id: 1 }])
+    })
+
+    it(`should skip 204 in long-poll loop without breaking stream`, async () => {
+      mockFetch
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify([{ id: 1 }]), {
+            status: 200,
+            headers: {
+              "content-type": `application/json`,
+              [STREAM_OFFSET_HEADER]: `1_10`,
+            },
+          })
+        )
+        .mockResolvedValueOnce(
+          new Response(null, {
+            status: 204,
+            headers: { [STREAM_OFFSET_HEADER]: `1_10` },
+          })
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify([{ id: 2 }]), {
+            status: 200,
+            headers: {
+              "content-type": `application/json`,
+              [STREAM_OFFSET_HEADER]: `2_20`,
+              [STREAM_UP_TO_DATE_HEADER]: `true`,
+            },
+          })
+        )
+
+      const res = await stream<{ id: number }>({
+        url: `https://example.com/stream`,
+        fetch: mockFetch,
+        live: `long-poll`,
+      })
+
+      const items = await res.json()
+
+      expect(mockFetch).toHaveBeenCalledTimes(3)
+      expect(items).toEqual([{ id: 1 }, { id: 2 }])
+    })
+  })
+
   describe(`live mode semantics`, () => {
     it(`should stop at upToDate when live: false with body()`, async () => {
       mockFetch.mockResolvedValue(

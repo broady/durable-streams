@@ -455,16 +455,20 @@ export class StreamResponseImpl<
               )
               // Fall through to SSE processing below
             } else {
-              // Regular response - enqueue it
-              controller.enqueue(firstResponse)
+              // 204 No Content means no data yet - skip to long-poll loop
+              if (firstResponse.status !== 204) {
+                // Regular response - enqueue it
+                controller.enqueue(firstResponse)
 
-              // If upToDate and not continuing live, we're done
-              if (this.upToDate && !this.#shouldContinueLive()) {
-                this.#markClosed()
-                controller.close()
+                // If upToDate and not continuing live, we're done
+                if (this.upToDate && !this.#shouldContinueLive()) {
+                  this.#markClosed()
+                  controller.close()
+                  return
+                }
                 return
               }
-              return
+              // Fall through to long-poll loop for 204
             }
           }
 
@@ -503,7 +507,7 @@ export class StreamResponseImpl<
           }
 
           // Long-poll mode: continue with live updates if needed
-          if (this.#shouldContinueLive()) {
+          while (this.#shouldContinueLive()) {
             if (this.#abortController.signal.aborted) {
               this.#markClosed()
               controller.close()
@@ -517,6 +521,13 @@ export class StreamResponseImpl<
             )
 
             this.#updateStateFromResponse(response)
+
+            // 204 No Content means long-poll timeout with no new data
+            // Don't enqueue it (empty body would fail JSON parse), loop to fetch again
+            if (response.status === 204) {
+              continue
+            }
+
             controller.enqueue(response)
             // Let the next pull() decide whether to close based on upToDate
             return
