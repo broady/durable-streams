@@ -49,6 +49,7 @@ AI products make this painfully visible. Token streaming is the UI for chat and 
 - **Share links** - A stream is a URL. Multiple viewers can watch the same stream together in real-time
 - **Never re-run** - Don't repeat expensive work because a client disconnected mid-stream
 - **Multi-device** - Start on your phone, continue on your laptop, watch from a shared link—all in sync
+- **Multi-tab** - Works seamlessly across browser tabs without duplicating connections or missing data
 - **Massive fan-out** - CDN-friendly design means one origin can serve millions of concurrent viewers
 
 The protocol provides:
@@ -382,17 +383,16 @@ Content-Type: application/json
 
 **How it works:**
 
+- **Shared streams** - Backends write to a stream, multiple clients subscribe to it in real-time
 - **Offset-based URLs** - Same offset = same data, perfect for caching
 - **Request collapsing** - 10,000 viewers at the same offset become one upstream request
 - **Edge delivery** - CDN edges serve catch-up reads; origin only handles new writes
-- **Cache-Control** - Historical data cached for 60s, stale content served during revalidation
 
 **What this enables:**
 
 - **Live dashboards** - Thousands of viewers watch the same metrics stream
 - **Collaborative apps** - Multiple users sync to the same document or workspace
 - **Shared debugging** - Watch a user's session in real-time to troubleshoot together
-- **Multi-tab** - Open the same stream in multiple tabs without multiplying load
 
 ## Performance
 
@@ -433,7 +433,7 @@ Your application server consumes from backend streaming systems, applies authori
 
 ## Relationship to SSE and WebSockets
 
-SSE and WebSockets are good transports for real-time delivery—Durable Streams uses SSE as one of its delivery modes (`live=sse`). The difference isn't the transport; it's what sits behind it.
+SSE and WebSockets are good transports for real-time delivery. Durable Streams uses SSE as one of its delivery modes (`live=sse`). The difference isn't the transport, it's what sits behind it.
 
 **SSE/WebSockets give you a connection. Durable Streams gives you a log.**
 
@@ -447,6 +447,7 @@ Durable Streams standardizes the durable log underneath:
 - **Multi-reader support** - Multiple clients can subscribe to the same stream
 - **CDN-friendly** - Offset-based URLs enable aggressive caching and request collapsing
 - **Stateless servers** - Clients track their own offsets; no connection state to manage
+- **Standard protocol** - Reusable clients and framework integrations that work with any conforming server
 
 The result: SSE (or long-poll) for the last mile, durable log semantics everywhere else. You get the simplicity of HTTP streaming with the reliability of an append-only log.
 
