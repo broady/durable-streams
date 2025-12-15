@@ -59,11 +59,11 @@ function getCompressionEncoding(
 
   // Prefer gzip over deflate (better compression, wider support)
   for (const encoding of encodings) {
-    const name = encoding.split(`;`)[0].trim()
+    const name = encoding.split(`;`)[0]?.trim()
     if (name === `gzip`) return `gzip`
   }
   for (const encoding of encodings) {
-    const name = encoding.split(`;`)[0].trim()
+    const name = encoding.split(`;`)[0]?.trim()
     if (name === `deflate`) return `deflate`
   }
 
