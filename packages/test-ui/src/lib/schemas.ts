@@ -123,6 +123,7 @@ export const registryStateSchema = createStateSchema({
     streams: {
       schema: streamMetadataSchema,
       type: `stream`,
+      primaryKey: `path`,
     },
   },
 })
@@ -132,6 +133,7 @@ export const presenceStateSchema = createStateSchema({
     presence: {
       schema: presenceSchema,
       type: `presence`,
+      primaryKey: `sessionId`,
     },
   },
 })

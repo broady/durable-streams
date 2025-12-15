@@ -25,4 +25,9 @@ export type {
   CreateStreamDBOptions,
   StreamDB,
   StreamDBMethods,
+  StreamDBUtils,
+  StreamDBWithActions,
+  ActionFactory,
+  ActionMap,
+  ActionDefinition,
 } from "./stream-db"

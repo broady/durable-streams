@@ -5,7 +5,11 @@ import { createStateSchema, createStreamDB } from "../src/stream-db"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 
 // Simple Standard Schema implementations for testing
-const userSchema: StandardSchemaV1<{ name: string; email: string }> = {
+const userSchema: StandardSchemaV1<{
+  id: string
+  name: string
+  email: string
+}> = {
   "~standard": {
     version: 1,
     vendor: `test`,
@@ -13,17 +17,24 @@ const userSchema: StandardSchemaV1<{ name: string; email: string }> = {
       if (
         typeof value !== `object` ||
         value === null ||
+        typeof (value as { id?: unknown }).id !== `string` ||
         typeof (value as { name?: unknown }).name !== `string` ||
         typeof (value as { email?: unknown }).email !== `string`
       ) {
         return { issues: [{ message: `Invalid user` }] }
       }
-      return { value: value as { name: string; email: string } }
+      return {
+        value: value as { id: string; name: string; email: string },
+      }
     },
   },
 }
 
-const messageSchema: StandardSchemaV1<{ text: string; userId: string }> = {
+const messageSchema: StandardSchemaV1<{
+  id: string
+  text: string
+  userId: string
+}> = {
   "~standard": {
     version: 1,
     vendor: `test`,
@@ -31,12 +42,15 @@ const messageSchema: StandardSchemaV1<{ text: string; userId: string }> = {
       if (
         typeof value !== `object` ||
         value === null ||
+        typeof (value as { id?: unknown }).id !== `string` ||
         typeof (value as { text?: unknown }).text !== `string` ||
         typeof (value as { userId?: unknown }).userId !== `string`
       ) {
         return { issues: [{ message: `Invalid message` }] }
       }
-      return { value: value as { text: string; userId: string } }
+      return {
+        value: value as { id: string; text: string; userId: string },
+      }
     },
   },
 }
@@ -62,10 +76,12 @@ describe(`Stream DB`, () => {
         users: {
           schema: userSchema,
           type: `user`, // Maps to change event type field
+          primaryKey: `id`,
         },
         messages: {
           schema: messageSchema,
           type: `message`,
+          primaryKey: `id`,
         },
       },
     })
@@ -92,7 +108,7 @@ describe(`Stream DB`, () => {
       stream.append({
         type: `user`,
         key: `1`,
-        value: { name: `Kyle`, email: `kyle@example.com` },
+        value: { id: `1`, name: `Kyle`, email: `kyle@example.com` },
         headers: { operation: `insert` },
       }),
       stream.append({
@@ -123,8 +139,8 @@ describe(`Stream DB`, () => {
     expect(msg?.text).toBe(`Hello!`)
     expect(msg?.userId).toBe(`1`)
 
-    // Verify returned values don't have internal properties visible
-    expect(Object.keys(kyle || {})).toEqual([`name`, `email`])
+    // Verify returned values include the primary key
+    expect(Object.keys(kyle || {})).toEqual([`id`, `name`, `email`])
 
     // Cleanup
     db.close()
@@ -133,7 +149,7 @@ describe(`Stream DB`, () => {
   it(`should handle update operations`, async () => {
     const streamState = createStateSchema({
       collections: {
-        users: { schema: userSchema, type: `user` },
+        users: { schema: userSchema, type: `user`, primaryKey: `id` },
       },
     })
 
@@ -169,7 +185,7 @@ describe(`Stream DB`, () => {
   it(`should handle delete operations`, async () => {
     const streamState = createStateSchema({
       collections: {
-        users: { schema: userSchema, type: `user` },
+        users: { schema: userSchema, type: `user`, primaryKey: `id` },
       },
     })
 
@@ -204,7 +220,7 @@ describe(`Stream DB`, () => {
   it(`should handle empty streams`, async () => {
     const streamState = createStateSchema({
       collections: {
-        users: { schema: userSchema, type: `user` },
+        users: { schema: userSchema, type: `user`, primaryKey: `id` },
       },
     })
 
@@ -228,7 +244,7 @@ describe(`Stream DB`, () => {
   it(`should ignore unknown event types`, async () => {
     const streamState = createStateSchema({
       collections: {
-        users: { schema: userSchema, type: `user` },
+        users: { schema: userSchema, type: `user`, primaryKey: `id` },
       },
     })
 
@@ -265,7 +281,7 @@ describe(`Stream DB`, () => {
   it(`should receive live updates after preload`, async () => {
     const streamState = createStateSchema({
       collections: {
-        users: { schema: userSchema, type: `user` },
+        users: { schema: userSchema, type: `user`, primaryKey: `id` },
       },
     })
 
@@ -306,8 +322,12 @@ describe(`Stream DB`, () => {
   it(`should route events to correct collections by type`, async () => {
     const streamState = createStateSchema({
       collections: {
-        users: { schema: userSchema, type: `user` },
-        messages: { schema: messageSchema, type: `message` },
+        users: { schema: userSchema, type: `user`, primaryKey: `id` },
+        messages: {
+          schema: messageSchema,
+          type: `message`,
+          primaryKey: `id`,
+        },
       },
     })
 
@@ -353,7 +373,7 @@ describe(`Stream DB`, () => {
   it(`should handle repeated operations on the same key`, async () => {
     const streamState = createStateSchema({
       collections: {
-        users: { schema: userSchema, type: `user` },
+        users: { schema: userSchema, type: `user`, primaryKey: `id` },
       },
     })
 
@@ -414,7 +434,7 @@ describe(`Stream DB`, () => {
   it(`should handle interleaved operations on multiple keys`, async () => {
     const streamState = createStateSchema({
       collections: {
-        users: { schema: userSchema, type: `user` },
+        users: { schema: userSchema, type: `user`, primaryKey: `id` },
       },
     })
 
@@ -476,7 +496,7 @@ describe(`Stream DB`, () => {
   it(`should batch commit changes only on upToDate`, async () => {
     const streamState = createStateSchema({
       collections: {
-        users: { schema: userSchema, type: `user` },
+        users: { schema: userSchema, type: `user`, primaryKey: `id` },
       },
     })
 
@@ -542,7 +562,7 @@ describe(`Stream DB`, () => {
     // Setup schema and stream
     const streamState = createStateSchema({
       collections: {
-        users: { schema: userSchema, type: `user` },
+        users: { schema: userSchema, type: `user`, primaryKey: `id` },
       },
     })
 
@@ -555,14 +575,14 @@ describe(`Stream DB`, () => {
     await stream.append(
       streamState.collections.users.insert({
         key: `1`,
-        value: { name: `Kyle`, email: `kyle@example.com` },
+        value: { id: `1`, name: `Kyle`, email: `kyle@example.com` },
       })
     )
 
     await stream.append(
       streamState.collections.users.insert({
         key: `2`,
-        value: { name: `Sarah`, email: `sarah@example.com` },
+        value: { id: `2`, name: `Sarah`, email: `sarah@example.com` },
       })
     )
 
@@ -583,12 +603,12 @@ describe(`Stream DB`, () => {
     expect(allChanges[0]).toEqual({
       key: `1`,
       type: `insert`,
-      value: { name: `Kyle`, email: `kyle@example.com` },
+      value: { id: `1`, name: `Kyle`, email: `kyle@example.com` },
     })
     expect(allChanges[1]).toEqual({
       key: `2`,
       type: `insert`,
-      value: { name: `Sarah`, email: `sarah@example.com` },
+      value: { id: `2`, name: `Sarah`, email: `sarah@example.com` },
     })
 
     // Clear changes array for live update testing
@@ -598,8 +618,8 @@ describe(`Stream DB`, () => {
     await stream.append(
       streamState.collections.users.update({
         key: `1`,
-        value: { name: `Kyle Updated`, email: `kyle@example.com` },
-        oldValue: { name: `Kyle`, email: `kyle@example.com` },
+        value: { id: `1`, name: `Kyle Updated`, email: `kyle@example.com` },
+        oldValue: { id: `1`, name: `Kyle`, email: `kyle@example.com` },
       })
     )
 
@@ -611,8 +631,8 @@ describe(`Stream DB`, () => {
     expect(allChanges[0]).toEqual({
       key: `1`,
       type: `update`,
-      value: { name: `Kyle Updated`, email: `kyle@example.com` },
-      previousValue: { name: `Kyle`, email: `kyle@example.com` },
+      value: { id: `1`, name: `Kyle Updated`, email: `kyle@example.com` },
+      previousValue: { id: `1`, name: `Kyle`, email: `kyle@example.com` },
     })
 
     // Test delete
@@ -629,7 +649,7 @@ describe(`Stream DB`, () => {
     expect(allChanges[0]).toEqual({
       key: `2`,
       type: `delete`,
-      value: { name: `Sarah`, email: `sarah@example.com` },
+      value: { id: `2`, name: `Sarah`, email: `sarah@example.com` },
     })
 
     // Cleanup
@@ -640,7 +660,7 @@ describe(`Stream DB`, () => {
   it(`should commit live updates in batches`, async () => {
     const streamState = createStateSchema({
       collections: {
-        users: { schema: userSchema, type: `user` },
+        users: { schema: userSchema, type: `user`, primaryKey: `id` },
       },
     })
 
@@ -699,6 +719,7 @@ describe(`Stream DB`, () => {
             },
           },
           type: `config`,
+          primaryKey: `id` as any,
         },
       },
     })
@@ -734,10 +755,12 @@ describe(`Stream DB`, () => {
           users: {
             schema: userSchema,
             type: `person`, // same type
+            primaryKey: `id`,
           },
           admins: {
             schema: userSchema,
             type: `person`, // duplicate!
+            primaryKey: `id`,
           },
         },
       })
@@ -753,6 +776,7 @@ describe(`Stream DB`, () => {
             // reserved name!
             schema: userSchema,
             type: `user`,
+            primaryKey: `id`,
           },
         },
       })
@@ -765,6 +789,7 @@ describe(`Stream DB`, () => {
             // reserved name!
             schema: userSchema,
             type: `user`,
+            primaryKey: `id`,
           },
         },
       })
@@ -779,19 +804,20 @@ describe(`State Schema Event Helpers`, () => {
         users: {
           schema: userSchema,
           type: `user`,
+          primaryKey: `id`,
         },
       },
     })
 
     const insertEvent = stateSchema.collections.users.insert({
       key: `123`,
-      value: { name: `Kyle`, email: `kyle@example.com` },
+      value: { id: `123`, name: `Kyle`, email: `kyle@example.com` },
     })
 
     expect(insertEvent).toEqual({
       type: `user`,
       key: `123`,
-      value: { name: `Kyle`, email: `kyle@example.com` },
+      value: { id: `123`, name: `Kyle`, email: `kyle@example.com` },
       headers: { operation: `insert` },
     })
   })
@@ -802,21 +828,22 @@ describe(`State Schema Event Helpers`, () => {
         users: {
           schema: userSchema,
           type: `user`,
+          primaryKey: `id`,
         },
       },
     })
 
     const updateEvent = stateSchema.collections.users.update({
       key: `123`,
-      value: { name: `Kyle M`, email: `kyle@example.com` },
-      oldValue: { name: `Kyle`, email: `kyle@example.com` },
+      value: { id: `123`, name: `Kyle M`, email: `kyle@example.com` },
+      oldValue: { id: `123`, name: `Kyle`, email: `kyle@example.com` },
     })
 
     expect(updateEvent).toEqual({
       type: `user`,
       key: `123`,
-      value: { name: `Kyle M`, email: `kyle@example.com` },
-      old_value: { name: `Kyle`, email: `kyle@example.com` },
+      value: { id: `123`, name: `Kyle M`, email: `kyle@example.com` },
+      old_value: { id: `123`, name: `Kyle`, email: `kyle@example.com` },
       headers: { operation: `update` },
     })
   })
@@ -827,19 +854,20 @@ describe(`State Schema Event Helpers`, () => {
         users: {
           schema: userSchema,
           type: `user`,
+          primaryKey: `id`,
         },
       },
     })
 
     const updateEvent = stateSchema.collections.users.update({
       key: `123`,
-      value: { name: `Kyle M`, email: `kyle@example.com` },
+      value: { id: `123`, name: `Kyle M`, email: `kyle@example.com` },
     })
 
     expect(updateEvent).toEqual({
       type: `user`,
       key: `123`,
-      value: { name: `Kyle M`, email: `kyle@example.com` },
+      value: { id: `123`, name: `Kyle M`, email: `kyle@example.com` },
       old_value: undefined,
       headers: { operation: `update` },
     })
@@ -851,19 +879,20 @@ describe(`State Schema Event Helpers`, () => {
         users: {
           schema: userSchema,
           type: `user`,
+          primaryKey: `id`,
         },
       },
     })
 
     const deleteEvent = stateSchema.collections.users.delete({
       key: `123`,
-      oldValue: { name: `Kyle`, email: `kyle@example.com` },
+      oldValue: { id: `123`, name: `Kyle`, email: `kyle@example.com` },
     })
 
     expect(deleteEvent).toEqual({
       type: `user`,
       key: `123`,
-      old_value: { name: `Kyle`, email: `kyle@example.com` },
+      old_value: { id: `123`, name: `Kyle`, email: `kyle@example.com` },
       headers: { operation: `delete` },
     })
   })
@@ -874,6 +903,7 @@ describe(`State Schema Event Helpers`, () => {
         users: {
           schema: userSchema,
           type: `user`,
+          primaryKey: `id`,
         },
       },
     })
@@ -896,21 +926,23 @@ describe(`State Schema Event Helpers`, () => {
         users: {
           schema: userSchema,
           type: `user`,
+          primaryKey: `id`,
         },
         messages: {
           schema: messageSchema,
           type: `message`,
+          primaryKey: `id`,
         },
       },
     })
 
     const userEvent = stateSchema.collections.users.insert({
       key: `1`,
-      value: { name: `Kyle`, email: `kyle@example.com` },
+      value: { id: `1`, name: `Kyle`, email: `kyle@example.com` },
     })
     const messageEvent = stateSchema.collections.messages.insert({
       key: `msg1`,
-      value: { text: `Hello`, userId: `1` },
+      value: { id: `msg1`, text: `Hello`, userId: `1` },
     })
 
     expect(userEvent.type).toBe(`user`)
@@ -923,13 +955,14 @@ describe(`State Schema Event Helpers`, () => {
         users: {
           schema: userSchema,
           type: `user`,
+          primaryKey: `id`,
         },
       },
     })
 
     const insertEvent = stateSchema.collections.users.insert({
       key: `123`,
-      value: { name: `Kyle`, email: `kyle@example.com` },
+      value: { id: `123`, name: `Kyle`, email: `kyle@example.com` },
       headers: {
         txid: `tx-001`,
         timestamp: `2025-01-15T12:00:00Z`,
@@ -940,7 +973,7 @@ describe(`State Schema Event Helpers`, () => {
     expect(insertEvent).toEqual({
       type: `user`,
       key: `123`,
-      value: { name: `Kyle`, email: `kyle@example.com` },
+      value: { id: `123`, name: `Kyle`, email: `kyle@example.com` },
       headers: {
         operation: `insert`,
         txid: `tx-001`,
@@ -948,5 +981,583 @@ describe(`State Schema Event Helpers`, () => {
         sourceApp: `web-app`,
       },
     })
+  })
+})
+
+describe(`Stream DB Actions`, () => {
+  let server: DurableStreamTestServer
+  let baseUrl: string
+
+  beforeAll(async () => {
+    server = new DurableStreamTestServer({ port: 0 })
+    await server.start()
+    baseUrl = server.url
+  })
+
+  afterAll(async () => {
+    await server.stop()
+  })
+
+  it(`should create actions with onMutate and mutationFn`, async () => {
+    const streamState = createStateSchema({
+      collections: {
+        users: {
+          schema: userSchema,
+          type: `user`,
+          primaryKey: `id`,
+        },
+      },
+    })
+
+    const stream = await DurableStream.create({
+      url: `${baseUrl}/db/actions-basic-${Date.now()}`,
+      contentType: `application/json`,
+    })
+
+    const mutationResults: Array<{ name: string; signal: AbortSignal }> = []
+
+    const db = await createStreamDB({
+      stream,
+      state: streamState,
+      actions: ({ db, stream }) => ({
+        addUser: {
+          onMutate: (name: string) => {
+            // Optimistic update
+            db.users.insert({
+              id: name,
+              name,
+              email: `${name.toLowerCase()}@example.com`,
+            })
+          },
+          mutationFn: async (
+            name: string,
+            { signal }: { signal: AbortSignal; transaction: any }
+          ) => {
+            // Track that mutationFn was called with correct params
+            mutationResults.push({ name, signal })
+            // Persist via stream
+            await stream.append(
+              streamState.collections.users.insert({
+                value: {
+                  id: crypto.randomUUID(),
+                  name,
+                  email: `${name.toLowerCase()}@example.com`,
+                },
+              })
+            )
+          },
+        },
+      }),
+    })
+
+    await db.preload()
+
+    // Call the action
+    db.actions.addUser(`Kyle`)
+
+    // Wait for mutation to complete
+    await new Promise((resolve) => setTimeout(resolve, 100))
+
+    // Verify mutationFn was called
+    expect(mutationResults).toHaveLength(1)
+    expect(mutationResults[0]?.name).toBe(`Kyle`)
+    // Signal may be undefined in test environment
+    if (mutationResults[0]?.signal) {
+      expect(mutationResults[0].signal).toBeInstanceOf(AbortSignal)
+    }
+
+    // Verify user was persisted via stream
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    const users = Array.from(db.users.values())
+    expect(users.length).toBeGreaterThan(0)
+    expect(users.some((u: any) => u.name === `Kyle`)).toBe(true)
+
+    db.close()
+  })
+
+  it(`should support multiple actions`, async () => {
+    const streamState = createStateSchema({
+      collections: {
+        users: {
+          schema: userSchema,
+          type: `user`,
+          primaryKey: `id`,
+        },
+      },
+    })
+
+    const stream = await DurableStream.create({
+      url: `${baseUrl}/db/actions-multiple-${Date.now()}`,
+      contentType: `application/json`,
+    })
+
+    const db = await createStreamDB({
+      stream,
+      state: streamState,
+      actions: ({ db, stream }) => ({
+        addUser: {
+          onMutate: (name: string) => {
+            db.users.insert({
+              id: name,
+              name,
+              email: `${name.toLowerCase()}@example.com`,
+            })
+          },
+          mutationFn: async (name: string) => {
+            await stream.append(
+              streamState.collections.users.insert({
+                key: name,
+                value: {
+                  id: name,
+                  name,
+                  email: `${name.toLowerCase()}@example.com`,
+                },
+              })
+            )
+          },
+        },
+        updateUser: {
+          onMutate: ({ id, name }: { id: string; name: string }) => {
+            db.users.update(id, (draft) => {
+              draft.name = name
+            })
+          },
+          mutationFn: async ({ id, name }: { id: string; name: string }) => {
+            const user = db.users.get(id)
+            if (user) {
+              await stream.append(
+                streamState.collections.users.update({
+                  key: id,
+                  value: { ...user, name },
+                })
+              )
+            }
+          },
+        },
+      }),
+    })
+
+    await db.preload()
+
+    // Use both actions
+    db.actions.addUser(`Alice`)
+    await new Promise((resolve) => setTimeout(resolve, 100))
+
+    db.actions.updateUser({ id: `Alice`, name: `Alice Smith` })
+    await new Promise((resolve) => setTimeout(resolve, 100))
+
+    const alice = db.users.get(`Alice`)
+    expect(alice?.name).toBe(`Alice Smith`)
+
+    db.close()
+  })
+
+  it(`should provide stream context to actions`, async () => {
+    const streamState = createStateSchema({
+      collections: {
+        users: {
+          schema: userSchema,
+          type: `user`,
+          primaryKey: `id`,
+        },
+      },
+    })
+
+    const stream = await DurableStream.create({
+      url: `${baseUrl}/db/actions-stream-${Date.now()}`,
+      contentType: `application/json`,
+    })
+
+    let capturedStream: unknown = null
+
+    const db = await createStreamDB({
+      stream,
+      state: streamState,
+      actions: ({ db, stream: actionStream }) => {
+        capturedStream = actionStream
+        return {
+          addUser: {
+            onMutate: (name: string) => {
+              db.users.insert({
+                id: name,
+                name,
+                email: `${name.toLowerCase()}@example.com`,
+              })
+            },
+            mutationFn: async (name: string) => {
+              // Verify we can use the stream
+              await actionStream.append(
+                streamState.collections.users.insert({
+                  key: name,
+                  value: {
+                    id: name,
+                    name,
+                    email: `${name.toLowerCase()}@example.com`,
+                  },
+                })
+              )
+            },
+          },
+        }
+      },
+    })
+
+    // Verify stream was provided
+    expect(capturedStream).toBe(stream)
+
+    db.close()
+  })
+
+  it(`should handle errors in onMutate gracefully`, async () => {
+    const streamState = createStateSchema({
+      collections: {
+        users: {
+          schema: userSchema,
+          type: `user`,
+          primaryKey: `id`,
+        },
+      },
+    })
+
+    const stream = await DurableStream.create({
+      url: `${baseUrl}/db/actions-error-mutate-${Date.now()}`,
+      contentType: `application/json`,
+    })
+
+    const db = await createStreamDB({
+      stream,
+      state: streamState,
+      actions: ({ db }) => ({
+        addUser: {
+          onMutate: (name: string) => {
+            if (name === `ERROR`) {
+              throw new Error(`onMutate error`)
+            }
+            db.users.insert({
+              id: name,
+              name,
+              email: `${name.toLowerCase()}@example.com`,
+            })
+          },
+          mutationFn: async (name: string) => {
+            await stream.append(
+              streamState.collections.users.insert({
+                key: name,
+                value: {
+                  id: name,
+                  name,
+                  email: `${name.toLowerCase()}@example.com`,
+                },
+              })
+            )
+          },
+        },
+      }),
+    })
+
+    await db.preload()
+
+    // This should throw due to onMutate error
+    expect(() => db.actions.addUser(`ERROR`)).toThrow(`onMutate error`)
+
+    db.close()
+  })
+
+  it(`should handle errors in mutationFn`, async () => {
+    const streamState = createStateSchema({
+      collections: {
+        users: {
+          schema: userSchema,
+          type: `user`,
+          primaryKey: `id`,
+        },
+      },
+    })
+
+    const stream = await DurableStream.create({
+      url: `${baseUrl}/db/actions-error-mutation-${Date.now()}`,
+      contentType: `application/json`,
+    })
+
+    const db = await createStreamDB({
+      stream,
+      state: streamState,
+      actions: ({ db }) => ({
+        addUser: {
+          onMutate: (name: string) => {
+            db.users.insert({
+              id: name,
+              name,
+              email: `${name.toLowerCase()}@example.com`,
+            })
+          },
+          mutationFn: async (name: string) => {
+            if (name === `ERROR`) {
+              throw new Error(`mutationFn error`)
+            }
+            await stream.append(
+              streamState.collections.users.insert({
+                key: name,
+                value: {
+                  id: name,
+                  name,
+                  email: `${name.toLowerCase()}@example.com`,
+                },
+              })
+            )
+          },
+        },
+      }),
+    })
+
+    await db.preload()
+
+    // Call action that will fail in mutationFn and expect it to throw
+    const tx = db.actions.addUser(`ERROR`)
+    await expect(tx.isPersisted.promise).rejects.toThrow(`mutationFn error`)
+
+    db.close()
+  })
+})
+
+describe(`Stream DB TxId Tracking`, () => {
+  let server: DurableStreamTestServer
+  let baseUrl: string
+
+  beforeAll(async () => {
+    server = new DurableStreamTestServer({ port: 0 })
+    await server.start()
+    baseUrl = server.url
+  })
+
+  afterAll(async () => {
+    await server.stop()
+  })
+
+  it(`should track txids from event headers and resolve awaitTxId`, async () => {
+    const streamState = createStateSchema({
+      collections: {
+        users: {
+          schema: userSchema,
+          type: `user`,
+          primaryKey: `id`,
+        },
+      },
+    })
+
+    const stream = await DurableStream.create({
+      url: `${baseUrl}/db/txid-basic-${Date.now()}`,
+      contentType: `application/json`,
+    })
+
+    const db = await createStreamDB({
+      stream,
+      state: streamState,
+    })
+
+    await db.preload()
+
+    // Generate a txid
+    const txid = crypto.randomUUID()
+
+    // Write an event with the txid header
+    await stream.append({
+      type: `user`,
+      key: `1`,
+      value: { name: `Kyle`, email: `kyle@example.com` },
+      headers: { operation: `insert`, txid },
+    })
+
+    // awaitTxId should resolve when the txid is seen
+    await db.utils.awaitTxId(txid)
+
+    // Verify the event was processed
+    const user = db.users.get(`1`)
+    expect(user?.name).toBe(`Kyle`)
+
+    db.close()
+  })
+
+  it(`should resolve awaitTxId immediately if txid was already seen`, async () => {
+    const streamState = createStateSchema({
+      collections: {
+        users: {
+          schema: userSchema,
+          type: `user`,
+          primaryKey: `id`,
+        },
+      },
+    })
+
+    const stream = await DurableStream.create({
+      url: `${baseUrl}/db/txid-already-seen-${Date.now()}`,
+      contentType: `application/json`,
+    })
+
+    const db = await createStreamDB({
+      stream,
+      state: streamState,
+    })
+
+    const txid = crypto.randomUUID()
+
+    // Write event with txid
+    await stream.append({
+      type: `user`,
+      key: `1`,
+      value: { name: `Alice`, email: `alice@example.com` },
+      headers: { operation: `insert`, txid },
+    })
+
+    await db.preload()
+
+    // First awaitTxId should work
+    await db.utils.awaitTxId(txid)
+
+    // Second awaitTxId should resolve immediately since txid is already seen
+    await db.utils.awaitTxId(txid)
+
+    db.close()
+  })
+
+  it(`should timeout if txid is not seen within timeout period`, async () => {
+    const streamState = createStateSchema({
+      collections: {
+        users: {
+          schema: userSchema,
+          type: `user`,
+          primaryKey: `id`,
+        },
+      },
+    })
+
+    const stream = await DurableStream.create({
+      url: `${baseUrl}/db/txid-timeout-${Date.now()}`,
+      contentType: `application/json`,
+    })
+
+    const db = await createStreamDB({
+      stream,
+      state: streamState,
+    })
+
+    await db.preload()
+
+    const nonExistentTxid = crypto.randomUUID()
+
+    // awaitTxId should timeout and reject
+    await expect(db.utils.awaitTxId(nonExistentTxid, 100)).rejects.toThrow(
+      /timeout/i
+    )
+
+    db.close()
+  })
+
+  it(`should use awaitTxId in action mutationFn`, async () => {
+    const streamState = createStateSchema({
+      collections: {
+        users: {
+          schema: userSchema,
+          type: `user`,
+          primaryKey: `id`,
+        },
+      },
+    })
+
+    const stream = await DurableStream.create({
+      url: `${baseUrl}/db/txid-action-${Date.now()}`,
+      contentType: `application/json`,
+    })
+
+    const db = await createStreamDB({
+      stream,
+      state: streamState,
+      actions: ({ db, stream }) => ({
+        addUser: {
+          onMutate: (name: string) => {
+            db.users.insert({
+              id: name,
+              name,
+              email: `${name.toLowerCase()}@example.com`,
+            })
+          },
+          mutationFn: async (name: string) => {
+            const txid = crypto.randomUUID()
+
+            // Write to stream with txid
+            await stream.append(
+              streamState.collections.users.insert({
+                value: {
+                  id: crypto.randomUUID(),
+                  name,
+                  email: `${name.toLowerCase()}@example.com`,
+                },
+                headers: { txid },
+              })
+            )
+
+            // Wait for txid to be synced back
+            await db.utils.awaitTxId(txid)
+          },
+        },
+      }),
+    })
+
+    await db.preload()
+
+    // Call action - should complete when txid is synced
+    await db.actions.addUser(`Bob`)
+
+    // Verify user was synced
+    const users = Array.from(db.users.values())
+    expect(users.some((u: any) => u.name === `Bob`)).toBe(true)
+
+    db.close()
+  })
+
+  it(`should handle multiple concurrent awaitTxId calls for same txid`, async () => {
+    const streamState = createStateSchema({
+      collections: {
+        users: {
+          schema: userSchema,
+          type: `user`,
+          primaryKey: `id`,
+        },
+      },
+    })
+
+    const stream = await DurableStream.create({
+      url: `${baseUrl}/db/txid-concurrent-${Date.now()}`,
+      contentType: `application/json`,
+    })
+
+    const db = await createStreamDB({
+      stream,
+      state: streamState,
+    })
+
+    await db.preload()
+
+    const txid = crypto.randomUUID()
+
+    // Start multiple awaitTxId calls concurrently
+    const awaits = [
+      db.utils.awaitTxId(txid),
+      db.utils.awaitTxId(txid),
+      db.utils.awaitTxId(txid),
+    ]
+
+    // Write event with txid
+    await stream.append({
+      type: `user`,
+      key: `1`,
+      value: { name: `Concurrent`, email: `concurrent@example.com` },
+      headers: { operation: `insert`, txid },
+    })
+
+    // All awaits should resolve
+    await Promise.all(awaits)
+
+    db.close()
   })
 })

@@ -1,4 +1,4 @@
-import { createCollection } from "@tanstack/db"
+import { createCollection, createOptimisticAction } from "@tanstack/db"
 import { isChangeEvent, isControlEvent } from "./types"
 import type { Collection, SyncConfig } from "@tanstack/db"
 import type { ChangeEvent, StateEvent } from "./types"
@@ -17,6 +17,8 @@ export interface CollectionDefinition<T = unknown> {
   schema: StandardSchemaV1<T>
   /** The type field value in change events that map to this collection */
   type: string
+  /** The property name in T that serves as the primary key */
+  primaryKey: string
 }
 
 /**
@@ -27,7 +29,7 @@ export interface CollectionEventHelpers<T> {
    * Create an insert change event
    */
   insert: (params: {
-    key: string
+    key?: string
     value: T
     headers?: Omit<Record<string, string>, `operation`>
   }) => ChangeEvent<T>
@@ -35,7 +37,7 @@ export interface CollectionEventHelpers<T> {
    * Create an update change event
    */
   update: (params: {
-    key: string
+    key?: string
     value: T
     oldValue?: T
     headers?: Omit<Record<string, string>, `operation`>
@@ -44,7 +46,7 @@ export interface CollectionEventHelpers<T> {
    * Create a delete change event
    */
   delete: (params: {
-    key: string
+    key?: string
     oldValue?: T
     headers?: Omit<Record<string, string>, `operation`>
   }) => ChangeEvent<T>
@@ -75,15 +77,45 @@ export type StateSchema<T extends Record<string, CollectionDefinition>> = {
 }
 
 /**
+ * Definition for a single action that can be passed to createOptimisticAction
+ */
+export interface ActionDefinition<TParams = any, TContext = any> {
+  onMutate: (params: TParams) => void
+  mutationFn: (params: TParams, context: TContext) => Promise<any>
+}
+
+/**
+ * Factory function for creating actions with access to db and stream context
+ */
+export type ActionFactory<
+  TDef extends StreamStateDefinition,
+  TActions extends Record<string, ActionDefinition<any>>,
+> = (context: { db: StreamDB<TDef>; stream: DurableStream }) => TActions
+
+/**
+ * Map action definitions to callable action functions
+ */
+export type ActionMap<TActions extends Record<string, ActionDefinition<any>>> =
+  {
+    [K in keyof TActions]: ReturnType<typeof createOptimisticAction<any>>
+  }
+
+/**
  * Options for creating a stream DB
  */
 export interface CreateStreamDBOptions<
   TDef extends StreamStateDefinition = StreamStateDefinition,
+  TActions extends Record<string, ActionDefinition<any>> = Record<
+    string,
+    never
+  >,
 > {
   /** The durable stream to subscribe to */
   stream: DurableStream
   /** The stream state definition */
   state: TDef
+  /** Optional factory function to create actions with db and stream context */
+  actions?: ActionFactory<TDef, TActions>
 }
 
 /**
@@ -109,6 +141,29 @@ export type StreamDB<TDef extends StreamStateDefinition> = CollectionMap<TDef> &
   StreamDBMethods
 
 /**
+ * StreamDB with actions
+ */
+export type StreamDBWithActions<
+  TDef extends StreamStateDefinition,
+  TActions extends Record<string, ActionDefinition<any>>,
+> = StreamDB<TDef> & {
+  actions: ActionMap<TActions>
+}
+
+/**
+ * Utility methods available on StreamDB
+ */
+export interface StreamDBUtils {
+  /**
+   * Wait for a specific transaction ID to be synced through the stream
+   * @param txid The transaction ID to wait for (UUID string)
+   * @param timeout Optional timeout in milliseconds (defaults to 5000ms)
+   * @returns Promise that resolves when the txid is synced
+   */
+  awaitTxId: (txid: string, timeout?: number) => Promise<void>
+}
+
+/**
  * Methods available on a StreamDB instance
  */
 export interface StreamDBMethods {
@@ -121,34 +176,11 @@ export interface StreamDBMethods {
    * Close the stream connection and cleanup
    */
   close: () => void
-}
 
-// ============================================================================
-// Key Storage
-// ============================================================================
-
-/**
- * WeakMap to associate value objects with their keys.
- * Using WeakMap allows values to be garbage collected when no longer referenced.
- */
-const valueToKey = new WeakMap<object, string>()
-
-/**
- * Store a key for a value object
- */
-function setValueKey(value: object, key: string): void {
-  valueToKey.set(value, key)
-}
-
-/**
- * Get the key from a value object
- */
-function getValueKey(value: object): string {
-  const key = valueToKey.get(value)
-  if (key === undefined) {
-    throw new Error(`No key found for value - this should not happen`)
-  }
-  return key
+  /**
+   * Utility methods for advanced stream operations
+   */
+  utils: StreamDBUtils
 }
 
 // ============================================================================
@@ -164,6 +196,7 @@ interface CollectionSyncHandler {
   commit: () => void
   markReady: () => void
   truncate: () => void
+  primaryKey: string
 }
 
 /**
@@ -183,6 +216,22 @@ class EventDispatcher {
   private preloadResolvers: Array<() => void> = []
   private preloadRejecters: Array<(error: Error) => void> = []
 
+  /** Set of all txids that have been seen and committed */
+  private seenTxids = new Set<string>()
+
+  /** Txids collected during current batch (before commit) */
+  private pendingTxids = new Set<string>()
+
+  /** Resolvers waiting for specific txids */
+  private txidResolvers = new Map<
+    string,
+    Array<{
+      resolve: () => void
+      reject: (error: Error) => void
+      timeoutId: ReturnType<typeof setTimeout>
+    }>
+  >()
+
   /**
    * Register a handler for a specific event type
    */
@@ -196,6 +245,11 @@ class EventDispatcher {
    */
   dispatchChange(event: StateEvent): void {
     if (!isChangeEvent(event)) return
+
+    // Check for txid in headers and collect it
+    if (event.headers.txid && typeof event.headers.txid === `string`) {
+      this.pendingTxids.add(event.headers.txid)
+    }
 
     const handler = this.handlers.get(event.type)
     if (!handler) {
@@ -220,8 +274,8 @@ class EventDispatcher {
     // Create a shallow copy to avoid mutating the original
     const value = { ...originalValue }
 
-    // Store the key association for this value copy
-    setValueKey(value, event.key)
+    // Set the primary key field on the value object from the event key
+    ;(value as any)[handler.primaryKey] = event.key
 
     // Begin transaction on first write to this handler
     if (!this.pendingHandlers.has(handler)) {
@@ -264,6 +318,22 @@ class EventDispatcher {
       handler.commit()
     }
     this.pendingHandlers.clear()
+
+    // Commit pending txids
+    for (const txid of this.pendingTxids) {
+      this.seenTxids.add(txid)
+
+      // Resolve any promises waiting for this txid
+      const resolvers = this.txidResolvers.get(txid)
+      if (resolvers) {
+        for (const { resolve, timeoutId } of resolvers) {
+          clearTimeout(timeoutId)
+          resolve()
+        }
+        this.txidResolvers.delete(txid)
+      }
+    }
+    this.pendingTxids.clear()
 
     if (!this.isUpToDate) {
       this.isUpToDate = true
@@ -309,6 +379,39 @@ class EventDispatcher {
   get ready(): boolean {
     return this.isUpToDate
   }
+
+  /**
+   * Wait for a specific txid to be seen in the stream
+   */
+  awaitTxId(txid: string, timeout: number = 5000): Promise<void> {
+    // Check if we've already seen this txid
+    if (this.seenTxids.has(txid)) {
+      return Promise.resolve()
+    }
+
+    return new Promise((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        // Remove this resolver from the map
+        const resolvers = this.txidResolvers.get(txid)
+        if (resolvers) {
+          const index = resolvers.findIndex((r) => r.timeoutId === timeoutId)
+          if (index !== -1) {
+            resolvers.splice(index, 1)
+          }
+          if (resolvers.length === 0) {
+            this.txidResolvers.delete(txid)
+          }
+        }
+        reject(new Error(`Timeout waiting for txid: ${txid}`))
+      }, timeout)
+
+      // Add to resolvers map
+      if (!this.txidResolvers.has(txid)) {
+        this.txidResolvers.set(txid, [])
+      }
+      this.txidResolvers.get(txid)!.push({ resolve, reject, timeoutId })
+    })
+  }
 }
 
 // ============================================================================
@@ -320,7 +423,8 @@ class EventDispatcher {
  */
 function createStreamSyncConfig<T extends object>(
   eventType: string,
-  dispatcher: EventDispatcher
+  dispatcher: EventDispatcher,
+  primaryKey: string
 ): SyncConfig<T, string> {
   return {
     sync: ({ begin, write, commit, markReady, truncate }) => {
@@ -336,6 +440,7 @@ function createStreamSyncConfig<T extends object>(
         commit,
         markReady,
         truncate,
+        primaryKey,
       })
 
       // If the dispatcher is already up-to-date, mark ready immediately
@@ -364,25 +469,26 @@ const RESERVED_COLLECTION_NAMES = new Set([`preload`, `close`])
  * Create helper functions for a collection
  */
 function createCollectionHelpers<T>(
-  eventType: string
+  eventType: string,
+  primaryKey: string
 ): CollectionEventHelpers<T> {
   return {
     insert: ({ key, value, headers }): ChangeEvent<T> => ({
       type: eventType,
-      key,
+      key: key ?? String((value as any)[primaryKey]),
       value,
       headers: { operation: `insert`, ...headers },
     }),
     update: ({ key, value, oldValue, headers }): ChangeEvent<T> => ({
       type: eventType,
-      key,
+      key: key ?? String((value as any)[primaryKey]),
       value,
       old_value: oldValue,
       headers: { operation: `update`, ...headers },
     }),
     delete: ({ key, oldValue, headers }): ChangeEvent<T> => ({
       type: eventType,
-      key,
+      key: key ?? (oldValue ? String((oldValue as any)[primaryKey]) : ``),
       old_value: oldValue,
       headers: { operation: `delete`, ...headers },
     }),
@@ -421,7 +527,7 @@ export function createStateSchema<
   for (const [name, collectionDef] of Object.entries(definition.collections)) {
     enhancedCollections[name] = {
       ...collectionDef,
-      ...createCollectionHelpers(collectionDef.type),
+      ...createCollectionHelpers(collectionDef.type, collectionDef.primaryKey),
     }
   }
 
@@ -457,10 +563,20 @@ export function createStateSchema<
  * const user = db.users.get("123")
  * ```
  */
-export async function createStreamDB<TDef extends StreamStateDefinition>(
-  options: CreateStreamDBOptions<TDef>
-): Promise<StreamDB<TDef>> {
-  const { stream, state } = options
+export async function createStreamDB<
+  TDef extends StreamStateDefinition,
+  TActions extends Record<string, ActionDefinition<any>> = Record<
+    string,
+    never
+  >,
+>(
+  options: CreateStreamDBOptions<TDef, TActions>
+): Promise<
+  TActions extends Record<string, never>
+    ? StreamDB<TDef>
+    : StreamDBWithActions<TDef, TActions>
+> {
+  const { stream, state, actions: actionsFactory } = options
 
   // Create the event dispatcher
   const dispatcher = new EventDispatcher()
@@ -472,8 +588,12 @@ export async function createStreamDB<TDef extends StreamStateDefinition>(
     const collection = createCollection({
       id: `stream-db:${name}`,
       schema: definition.schema as StandardSchemaV1<object>,
-      getKey: (item: object) => getValueKey(item),
-      sync: createStreamSyncConfig(definition.type, dispatcher),
+      getKey: (item: any) => String(item[definition.primaryKey]),
+      sync: createStreamSyncConfig(
+        definition.type,
+        dispatcher,
+        definition.primaryKey
+      ),
       startSync: true, // Start syncing immediately
       // Disable GC - we manage lifecycle via db.close()
       // DB would otherwise clean up the collections independently of each other, we
@@ -536,6 +656,10 @@ export async function createStreamDB<TDef extends StreamStateDefinition>(
     close: () => {
       abortController.abort()
     },
+    utils: {
+      awaitTxId: (txid: string, timeout?: number) =>
+        dispatcher.awaitTxId(txid, timeout),
+    },
   }
 
   // Combine collections with methods
@@ -544,5 +668,25 @@ export async function createStreamDB<TDef extends StreamStateDefinition>(
     ...dbMethods,
   } as unknown as StreamDB<TDef>
 
-  return db
+  // If actions factory is provided, wrap actions and return db with actions
+  if (actionsFactory) {
+    const actionDefs = actionsFactory({ db, stream })
+    const wrappedActions: Record<
+      string,
+      ReturnType<typeof createOptimisticAction>
+    > = {}
+    for (const [name, def] of Object.entries(actionDefs)) {
+      wrappedActions[name] = createOptimisticAction({
+        onMutate: def.onMutate,
+        mutationFn: def.mutationFn,
+      })
+    }
+
+    return {
+      ...db,
+      actions: wrappedActions,
+    } as any
+  }
+
+  return db as any
 }

@@ -2,8 +2,8 @@ import { createContext, useContext, useEffect, useMemo, useState } from "react"
 import { DurableStream } from "@durable-streams/client"
 import { createStreamDB } from "@durable-streams/state"
 import { presenceStateSchema, registryStateSchema } from "./schemas"
+import type { PresenceData, StreamMetadata } from "./schemas"
 import type { ReactNode } from "react"
-import type { StreamDB } from "@durable-streams/state"
 
 const SERVER_URL = `http://${typeof window !== `undefined` ? window.location.hostname : `localhost`}:8787`
 
@@ -51,12 +51,89 @@ export function getUserColor(userId: string): string {
 }
 
 // ============================================================================
+// StreamDB Factories with Actions
+// ============================================================================
+
+async function createRegistryDB(stream: DurableStream) {
+  return createStreamDB({
+    stream,
+    state: registryStateSchema,
+    actions: ({ db, stream }) => ({
+      addStream: {
+        onMutate: (metadata: StreamMetadata) => {
+          db.streams.insert(metadata)
+        },
+        mutationFn: async (metadata: StreamMetadata) => {
+          const txid = crypto.randomUUID()
+          await stream.append(
+            registryStateSchema.collections.streams.insert({
+              value: metadata,
+              headers: { txid },
+            })
+          )
+          await db.utils.awaitTxId(txid)
+        },
+      },
+    }),
+  })
+}
+
+async function createPresenceDB(stream: DurableStream) {
+  return createStreamDB({
+    stream,
+    state: presenceStateSchema,
+    actions: ({ db, stream }) => ({
+      updatePresence: {
+        onMutate: (data: PresenceData) => {
+          // Use insert if doesn't exist, update if it does (upsert behavior)
+          const existing = db.presence.get(data.sessionId)
+          if (existing) {
+            db.presence.update(data.sessionId, (draft) => {
+              for (const key of Object.keys(data)) {
+                draft[key] = data[key]
+              }
+            })
+          } else {
+            db.presence.insert(data)
+          }
+        },
+        mutationFn: async (data: PresenceData) => {
+          const txid = crypto.randomUUID()
+          await stream.append(
+            presenceStateSchema.collections.presence.update({
+              value: data,
+              headers: { txid },
+            })
+          )
+          await db.utils.awaitTxId(txid)
+        },
+      },
+      deletePresence: {
+        onMutate: (sessionId: string) => {
+          db.presence.delete(sessionId)
+        },
+        mutationFn: async (sessionId: string) => {
+          const txid = crypto.randomUUID()
+          await stream.append(
+            presenceStateSchema.collections.presence.delete({
+              oldValue: { sessionId } as PresenceData,
+              headers: { txid },
+            })
+          )
+          await db.utils.awaitTxId(txid)
+        },
+      },
+    }),
+  })
+}
+
+// ============================================================================
 // Context
 // ============================================================================
 
 interface StreamDBContextValue {
-  registryDB: StreamDB<typeof registryStateSchema>
-  presenceDB: StreamDB<typeof presenceStateSchema>
+  registryDB: Awaited<ReturnType<typeof createRegistryDB>>
+  presenceDB: Awaited<ReturnType<typeof createPresenceDB>>
   registryStream: DurableStream
   presenceStream: DurableStream
   userId: string
@@ -85,8 +162,8 @@ export function StreamDBProvider({ children }: { children: ReactNode }) {
   const userColor = useMemo(() => getUserColor(userId), [userId])
 
   useEffect(() => {
-    let registryDB: StreamDB<typeof registryStateSchema> | null = null
-    let presenceDB: StreamDB<typeof presenceStateSchema> | null = null
+    let registryDB: Awaited<ReturnType<typeof createRegistryDB>> | null = null
+    let presenceDB: Awaited<ReturnType<typeof createPresenceDB>> | null = null
     let cancelled = false
 
     const initDBs = async () => {
@@ -128,21 +205,15 @@ export function StreamDBProvider({ children }: { children: ReactNode }) {
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       if (cancelled) return
 
-      // Create StreamDBs
-      registryDB = await createStreamDB({
-        stream: registryStream,
-        state: registryStateSchema,
-      })
+      // Create StreamDBs with actions
+      registryDB = await createRegistryDB(registryStream)
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       if (cancelled) {
         registryDB.close()
         return
       }
 
-      presenceDB = await createStreamDB({
-        stream: presenceStream,
-        state: presenceStateSchema,
-      })
+      presenceDB = await createPresenceDB(presenceStream)
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       if (cancelled) {
         registryDB.close()
