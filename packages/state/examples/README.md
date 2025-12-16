@@ -40,9 +40,9 @@ This will:
 
 ## Examples
 
-### index.html (Background Jobs with Progress Tracking)
+### background-jobs/
 
-**Progress Bar Example**
+**Background Jobs with Progress Tracking**
 
 A demo of the state protocol showing multiple concurrent background jobs with:
 

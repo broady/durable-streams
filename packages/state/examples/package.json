@@ -4,8 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite --open",
-    "build": "vite build"
+    "dev": "vite background-jobs --open",
+    "dev:background-jobs": "vite background-jobs --open",
+    "build": "vite build background-jobs"
   },
   "dependencies": {
     "@durable-streams/client": "workspace:*",
