@@ -282,32 +282,20 @@
     // Import from workspace packages
     import { DurableStream } from '@durable-streams/client'
     import { createStreamDB, createStateSchema } from '@durable-streams/state'
+    import { z } from 'zod'
 
     const SERVER_URL = 'http://localhost:4437'
 
-    // Define job schema
-    const jobSchema = {
-      '~standard': {
-        version: 1,
-        vendor: 'durable-streams',
-        validate: (value) => {
-          if (!value || typeof value !== 'object') {
-            return { issues: [{ message: 'Job must be an object' }] }
-          }
-          const job = value
-          if (typeof job.id !== 'string' || !job.id) {
-            return { issues: [{ message: 'Job must have an id' }] }
-          }
-          if (!['pending', 'running', 'completed', 'error'].includes(job.status)) {
-            return { issues: [{ message: 'Invalid job status' }] }
-          }
-          if (typeof job.progress !== 'number' || job.progress < 0 || job.progress > 100) {
-            return { issues: [{ message: 'Progress must be 0-100' }] }
-          }
-          return { value: job }
-        }
-      }
-    }
+    // Define job schema with Zod
+    const jobSchema = z.object({
+      id: z.string().min(1),
+      status: z.enum(['pending', 'running', 'completed', 'error']),
+      progress: z.number().min(0).max(100),
+      message: z.string(),
+      startedAt: z.number(),
+      completedAt: z.number().optional(),
+      error: z.string().optional()
+    })
 
     // Create state schema
     const stateSchema = createStateSchema({

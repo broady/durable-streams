@@ -197,6 +197,9 @@ importers:
       '@durable-streams/state':
         specifier: workspace:*
         version: link:..
+      zod:
+        specifier: ^3.24.1
+        version: 3.25.76
     devDependencies:
       vite:
         specifier: ^6.0.0

@@ -9,7 +9,8 @@
   },
   "dependencies": {
     "@durable-streams/client": "workspace:*",
-    "@durable-streams/state": "workspace:*"
+    "@durable-streams/state": "workspace:*",
+    "zod": "^3.24.1"
   },
   "devDependencies": {
     "vite": "^6.0.0"

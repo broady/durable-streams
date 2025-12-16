@@ -54,7 +54,7 @@ A demo of the state protocol showing multiple concurrent background jobs with:
 
 **Key Concepts Demonstrated:**
 
-- StreamDB collection setup with Standard Schema validation
+- StreamDB collection setup with Zod schema validation
 - Insert events to create new jobs
 - Update events for progress tracking
 - Real-time subscriptions with `subscribeChanges()`
@@ -74,7 +74,7 @@ Each example demonstrates:
 - **Single-file simplicity**: All HTML, CSS, and JS in one file
 - **State Protocol**: Event-driven state synchronization
 - **StreamDB**: Reactive collections backed by durable streams
-- **Standard Schema**: Type-safe validation
+- **Zod Validation**: Type-safe schema validation (Zod supports Standard Schema v1)
 - **Real-time updates**: Live UI updates as events flow through the stream
 
 ## Troubleshooting
