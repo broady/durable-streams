@@ -75,14 +75,20 @@ const db = await createStreamDB({
 // Load initial data
 await db.preload()
 
-// Query with TanStack DB
-const user = await db.collections.users.get("123")
-const allUsers = await db.collections.users.findAll()
+// Reactive queries with useLiveQuery
+import { useLiveQuery } from "@tanstack/react-db" // or solid-db, vue-db
+import { eq } from "@tanstack/db"
 
-// Subscribe to changes
-db.collections.users.subscribe("123", (user) => {
-  console.log("User updated:", user)
-})
+const userQuery = useLiveQuery((q) =>
+  q
+    .from({ users: db.collections.users })
+    .where(({ users }) => eq(users.id, "123"))
+    .findOne()
+)
+
+const allUsersQuery = useLiveQuery((q) =>
+  q.from({ users: db.collections.users })
+)
 ```
 
 ## Core Concepts
@@ -237,44 +243,81 @@ const db = await createStreamDB({
 await db.preload()
 ```
 
-### Querying Collections
+### Reactive Queries with TanStack DB
 
-StreamDB exposes TanStack DB collections under `db.collections.*`:
-
-```typescript
-// Get by key
-const user = await db.collections.users.get("123")
-
-// Get all
-const allUsers = await db.collections.users.findAll()
-
-// Find many with filter
-const activeUsers = await db.collections.users.findMany({
-  where: (user) => user.active === true,
-})
-
-// Check size
-const count = db.collections.users.size
-```
-
-### Subscriptions
+StreamDB collections are TanStack DB collections. Use TanStack DB's query builder for filtering, sorting, aggregation, and joins with **differential dataflow** - dramatically faster than JavaScript filtering:
 
 ```typescript
-// Subscribe to a specific entity
-const unsubscribe = db.collections.users.subscribe("123", (user) => {
-  console.log("User changed:", user)
+import { useLiveQuery } from "@tanstack/[framework]-db" // react-db, solid-db, etc
+import { eq, gt, and, count } from "@tanstack/db"
+
+// Simple collection access
+const query = useLiveQuery((q) => q.from({ users: db.collections.users }))
+
+// Filtering with WHERE
+const activeQuery = useLiveQuery((q) =>
+  q
+    .from({ users: db.collections.users })
+    .where(({ users }) => eq(users.active, true))
+)
+
+// Complex conditions
+const query = useLiveQuery((q) =>
+  q
+    .from({ users: db.collections.users })
+    .where(({ users }) => and(eq(users.active, true), gt(users.age, 18)))
+)
+
+// Sorting and limiting
+const topUsersQuery = useLiveQuery((q) =>
+  q
+    .from({ users: db.collections.users })
+    .orderBy(({ users }) => users.lastSeen, "desc")
+    .limit(10)
+)
+
+// Aggregation with GROUP BY and ordering
+const langStatsQuery = useLiveQuery((q) => {
+  const languageCounts = q
+    .from({ events: db.collections.events })
+    .groupBy(({ events }) => events.language)
+    .select(({ events }) => ({
+      language: events.language,
+      total: count(events.id),
+    }))
+
+  return q
+    .from({ stats: languageCounts })
+    .orderBy(({ stats }) => stats.total, "desc")
 })
 
-// Subscribe to all changes
-db.collections.users.subscribeChanges((changes) => {
-  for (const change of changes) {
-    console.log(`${change.type}: ${change.key}`, change.value)
-  }
-})
-
-// Cleanup
-unsubscribe()
+// Joins across collections
+const query = useLiveQuery((q) =>
+  q
+    .from({ messages: db.collections.messages })
+    .join({ users: db.collections.users }, ({ messages, users }) =>
+      eq(messages.userId, users.id)
+    )
+    .select(({ messages, users }) => ({
+      messageId: messages.id,
+      text: messages.text,
+      userName: users.name,
+    }))
+)
 ```
+
+**Why use the query builder?**
+
+- **Differential dataflow**: Incremental updates only recompute affected results
+- **Dramatically faster**: Push filtering/sorting into the DB engine vs JavaScript
+- **Reactive**: Queries automatically update when data changes
+- **Type-safe**: Full TypeScript support with autocomplete
+
+**Framework integration**: See [TanStack DB docs](https://tanstack.com/db) for framework-specific guides:
+
+- [@tanstack/react-db](https://tanstack.com/db/latest/docs/framework/react/overview)
+- [@tanstack/solid-db](https://tanstack.com/db/latest/docs/framework/solid/overview)
+- [@tanstack/vue-db](https://tanstack.com/db/latest/docs/framework/vue/overview)
 
 ### Lifecycle Methods
 
@@ -348,59 +391,59 @@ await db.actions.addUser({ id: "1", name: "Kyle", email: "kyle@example.com" })
 await db.actions.updateUser({ id: "1", updates: { name: "Kyle Mathews" } })
 ```
 
-## React Integration
+## Framework Integration
+
+Use TanStack DB's framework adapters for reactive queries:
+
+### React
 
 ```typescript
-import { useSyncExternalStore } from 'react'
-
-function useUser(id: string) {
-  return useSyncExternalStore(
-    (callback) => {
-      const unsubscribe = db.collections.users.subscribe(id, callback)
-      return unsubscribe
-    },
-    () => db.collections.users.get(id)
-  )
-}
+import { useLiveQuery } from '@tanstack/react-db'
+import { eq } from '@tanstack/db'
 
 function UserProfile({ userId }: { userId: string }) {
-  const user = useUser(userId)
+  const userQuery = useLiveQuery((q) =>
+    q.from({ users: db.collections.users })
+      .where(({ users }) => eq(users.id, userId))
+      .findOne()
+  )
 
-  if (!user) return <div>Loading...</div>
+  if (userQuery.isLoading()) return <div>Loading...</div>
+  if (!userQuery.data) return <div>Not found</div>
 
   return (
     <div>
-      <h1>{user.name}</h1>
-      <p>{user.email}</p>
+      <h1>{userQuery.data.name}</h1>
+      <p>{userQuery.data.email}</p>
     </div>
   )
 }
 ```
 
-Or with TanStack Query:
+See [@tanstack/react-db docs](https://tanstack.com/db/latest/docs/framework/react/overview) for more.
+
+### Solid.js
 
 ```typescript
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useLiveQuery } from '@tanstack/solid-db'
+import { eq } from '@tanstack/db'
 
-function useAddUser() {
-  return useMutation({
-    mutationFn: db.actions.addUser,
-  })
-}
-
-function AddUserButton() {
-  const addUser = useAddUser()
+function MessageList() {
+  const messagesQuery = useLiveQuery((q) =>
+    q.from({ messages: db.collections.messages })
+      .orderBy(({ messages }) => messages.timestamp, 'desc')
+      .limit(50)
+  )
 
   return (
-    <button
-      onClick={() => addUser.mutate({ id: '1', name: 'Kyle' })}
-      disabled={addUser.isPending}
-    >
-      Add User
-    </button>
+    <For each={messagesQuery.data}>
+      {(message) => <MessageCard message={message} />}
+    </For>
   )
 }
 ```
+
+See [@tanstack/solid-db docs](https://tanstack.com/db/latest/docs/framework/solid/overview) for more.
 
 ## Common Patterns
 
@@ -422,8 +465,13 @@ await stream.append(
   })
 )
 
-// Get value
-const theme = await db.collections.config.get("theme")
+// Query value reactively
+const themeQuery = useLiveQuery((q) =>
+  q
+    .from({ config: db.collections.config })
+    .where(({ config }) => eq(config.key, "theme"))
+    .findOne()
+)
 ```
 
 ### Presence Tracking
@@ -448,10 +496,12 @@ await stream.append(
   })
 )
 
-// Watch presence
-db.collections.presence.subscribe("kyle", (presence) => {
-  console.log(`Kyle is ${presence.status}`)
-})
+// Query presence with TanStack DB
+const presenceQuery = useLiveQuery((q) =>
+  q
+    .from({ presence: db.collections.presence })
+    .where(({ presence }) => eq(presence.status, "online"))
+)
 ```
 
 ### Multi-Type Chat Room
