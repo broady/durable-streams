@@ -1,6 +1,6 @@
 # @durable-streams/state
 
-State synchronization protocol for Durable Streams. Build real-time applications with database-style semantics over append-only streams.
+Building blocks for transmitting structured state over Durable Streams. Use these primitives for any real-time protocol: AI token streams, presence updates, collaborative editing, or database sync.
 
 ## Installation
 
@@ -8,7 +8,43 @@ State synchronization protocol for Durable Streams. Build real-time applications
 pnpm add @durable-streams/state
 ```
 
+## Overview
+
+This package provides flexible primitives for streaming structured state. You choose how much structure you need:
+
+- **Simple state updates**: Stream JSON payloads and track current values
+- **Typed collections**: Add schemas and primary keys for structured entities
+- **Reactive queries**: Build on TanStack DB for subscriptions and optimistic updates
+
+Stream whatever state your protocol requires.
+
 ## Quick Start
+
+### Simple State
+
+Stream structured JSON and query current values:
+
+```typescript
+import { MaterializedState } from "@durable-streams/state"
+
+const state = new MaterializedState()
+
+// Apply any structured change
+state.apply({
+  type: "token",
+  key: "stream-1",
+  value: { content: "Hello", model: "claude-3" },
+  headers: { operation: "insert" },
+})
+
+// Query current state
+const token = state.get("token", "stream-1")
+const allTokens = state.getType("token")
+```
+
+### Typed Collections
+
+Add schemas and validation for structured entities:
 
 ```typescript
 import { createStateSchema, createStreamDB } from "@durable-streams/state"
