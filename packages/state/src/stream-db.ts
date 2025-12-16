@@ -167,6 +167,11 @@ export interface StreamDBUtils {
  */
 export interface StreamDBMethods {
   /**
+   * The underlying DurableStream instance
+   */
+  stream: DurableStream
+
+  /**
    * Preload all collections by consuming the stream until up-to-date
    */
   preload: () => Promise<void>
@@ -738,6 +743,7 @@ export async function createStreamDB<
 
   // Build the StreamDB object with methods
   const dbMethods: StreamDBMethods = {
+    stream,
     preload: async () => {
       await startConsumer()
       await dispatcher.waitForUpToDate()

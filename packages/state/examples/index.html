@@ -307,25 +307,14 @@
     })
 
     // Initialize
-    let db, stream
+    let db
     const streamPath = '/jobs-demo'
 
     async function init() {
       try {
-        // Create or get stream
         const streamUrl = `${SERVER_URL}/v1/stream${streamPath}`
 
-        try {
-          stream = new DurableStream({ url: streamUrl })
-          await stream.head()
-        } catch {
-          stream = await DurableStream.create({
-            url: streamUrl,
-            contentType: 'application/json'
-          })
-        }
-
-        // Create StreamDB
+        // Create StreamDB - it will create the stream if needed
         db = await createStreamDB({
           streamOptions: {
             url: streamUrl,
@@ -373,7 +362,7 @@
         }
       })
 
-      await stream.append(event)
+      await db.stream.append(event)
 
       // Start background processing simulation
       simulateJobProgress(jobId)
@@ -402,7 +391,7 @@
       const stepDelay = Math.random() * 800 + 400 // 400-1200ms per step
 
       // Start job
-      await stream.append(stateSchema.jobs.update({
+      await db.stream.append(stateSchema.jobs.update({
         key: jobId,
         value: {
           id: jobId,
@@ -432,7 +421,7 @@
           ]
           const error = errors[Math.floor(Math.random() * errors.length)]
 
-          await stream.append(stateSchema.jobs.update({
+          await db.stream.append(stateSchema.jobs.update({
             key: jobId,
             value: {
               id: jobId,
@@ -450,7 +439,7 @@
         // Normal progress update
         if (step === totalSteps) {
           // Complete
-          await stream.append(stateSchema.jobs.update({
+          await db.stream.append(stateSchema.jobs.update({
             key: jobId,
             value: {
               id: jobId,
@@ -463,7 +452,7 @@
           }))
         } else {
           // In progress
-          await stream.append(stateSchema.jobs.update({
+          await db.stream.append(stateSchema.jobs.update({
             key: jobId,
             value: {
               id: jobId,
