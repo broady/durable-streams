@@ -73,7 +73,7 @@ class StreamStore {
         signal: subscription.abortController!.signal,
       })
 
-      response.subscribeText((chunk) => {
+      response.subscribeText(async (chunk) => {
         if (chunk.text !== ``) {
           // Create new array reference so React detects the change
           subscription.messages = [
