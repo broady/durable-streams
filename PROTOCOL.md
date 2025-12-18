@@ -391,6 +391,8 @@ Offsets are opaque tokens that identify positions within a stream. They have the
 1. **Opaque**: Clients **MUST NOT** interpret offset structure or meaning
 2. **Lexicographically Sortable**: For any two valid offsets for the same stream, a lexicographic comparison determines their relative position in the stream. Clients **MAY** compare offsets lexicographically to determine ordering.
 3. **Persistent**: Offsets remain valid for the lifetime of the stream (until deletion or expiration)
+4. **Unique**: Each offset identifies exactly one position in the stream. No two positions **MAY** share the same offset.
+5. **Strictly Increasing**: Offsets assigned to appended data **MUST** be lexicographically greater than all previously assigned offsets. Server implementations **MUST NOT** use schemes (such as raw UTC timestamps) that can produce duplicate or non-monotonic offsets. Time-based identifiers like ULIDs, which combine timestamps with random components to guarantee uniqueness and monotonicity, are acceptable.
 
 **Format**: Offset tokens are opaque, case-sensitive strings. Their internal structure is implementation-defined. Offsets are single tokens and **MUST NOT** contain commas, ampersands, equals signs, or question marks (to avoid conflict with URL query parameter syntax). Servers **SHOULD** use URL-safe characters to avoid encoding issues, but clients **MUST** properly URL-encode offset values when including them in query parameters.
 
