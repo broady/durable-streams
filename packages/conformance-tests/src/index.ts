@@ -1237,7 +1237,7 @@ export function runConformanceTests(options: ConformanceTestOptions): void {
       expect(text2).toBe(`chunk2chunk3`)
     })
 
-    test(`should enforce monotonic offset progression`, async () => {
+    test(`should generate unique, monotonically increasing offsets`, async () => {
       const streamPath = `/v1/stream/monotonic-offset-test-${Date.now()}`
 
       // Create stream
@@ -1261,7 +1261,7 @@ export function runConformanceTests(options: ConformanceTestOptions): void {
         offsets.push(offset!)
       }
 
-      // Verify offsets are lexicographically increasing
+      // Verify offsets are unique and strictly increasing (lexicographically)
       for (let i = 1; i < offsets.length; i++) {
         expect(offsets[i]! > offsets[i - 1]!).toBe(true)
       }
@@ -2623,7 +2623,7 @@ export function runConformanceTests(options: ConformanceTestOptions): void {
       expect(received).toContain(`data: line3`)
     })
 
-    test(`should maintain monotonic offsets over multiple messages`, async () => {
+    test(`should generate unique, monotonically increasing offsets in SSE mode`, async () => {
       const streamPath = `/v1/stream/sse-monotonic-offset-test-${Date.now()}`
 
       // Create stream
@@ -2687,9 +2687,9 @@ export function runConformanceTests(options: ConformanceTestOptions): void {
           offsets.push(data[`streamNextOffset`])
         }
 
-        // Verify offsets are monotonically increasing (lexicographically)
+        // Verify offsets are unique and strictly increasing (lexicographically)
         for (let i = 1; i < offsets.length; i++) {
-          expect(offsets[i]! >= offsets[i - 1]!).toBe(true)
+          expect(offsets[i]! > offsets[i - 1]!).toBe(true)
         }
       } catch (e) {
         clearTimeout(timeoutId)
