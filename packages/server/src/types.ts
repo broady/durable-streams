@@ -142,6 +142,19 @@ export interface TestServerOptions {
    * Default: true.
    */
   compression?: boolean
+
+  /**
+   * Interval in seconds for cursor calculation.
+   * Used for CDN cache collapsing to prevent infinite cache loops.
+   * Default: 20 seconds.
+   */
+  cursorIntervalSeconds?: number
+
+  /**
+   * Epoch timestamp for cursor interval calculation.
+   * Default: December 19, 2025 00:00:00 UTC.
+   */
+  cursorEpoch?: Date
 }
 
 /**

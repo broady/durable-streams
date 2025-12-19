@@ -6,6 +6,7 @@ import { createServer } from "node:http"
 import { deflateSync, gzipSync } from "node:zlib"
 import { StreamStore } from "./store"
 import { FileBackedStreamStore } from "./file-store"
+import { generateResponseCursor, type CursorOptions } from "./cursor"
 import type { IncomingMessage, Server, ServerResponse } from "node:http"
 import type { StreamLifecycleEvent, TestServerOptions } from "./types"
 
@@ -94,13 +95,19 @@ export class DurableStreamTestServer {
   private options: Required<
     Omit<
       TestServerOptions,
-      `dataDir` | `onStreamCreated` | `onStreamDeleted` | `compression`
+      | `dataDir`
+      | `onStreamCreated`
+      | `onStreamDeleted`
+      | `compression`
+      | `cursorIntervalSeconds`
+      | `cursorEpoch`
     >
   > & {
     dataDir?: string
     onStreamCreated?: (event: StreamLifecycleEvent) => void | Promise<void>
     onStreamDeleted?: (event: StreamLifecycleEvent) => void | Promise<void>
     compression: boolean
+    cursorOptions: CursorOptions
   }
   private _url: string | null = null
   private activeSSEResponses = new Set<ServerResponse>()
@@ -124,6 +131,10 @@ export class DurableStreamTestServer {
       onStreamCreated: options.onStreamCreated,
       onStreamDeleted: options.onStreamDeleted,
       compression: options.compression ?? true,
+      cursorOptions: {
+        intervalSeconds: options.cursorIntervalSeconds,
+        epoch: options.cursorEpoch,
+      },
     }
   }
 
@@ -522,9 +533,15 @@ export class DurableStreamTestServer {
 
       if (result.timedOut) {
         // Return 204 No Content on timeout (per Protocol Section 5.6)
+        // Generate cursor for CDN cache collapsing (Protocol Section 8.1)
+        const responseCursor = generateResponseCursor(
+          cursor,
+          this.options.cursorOptions
+        )
         res.writeHead(204, {
           [STREAM_OFFSET_HEADER]: offset,
           [STREAM_UP_TO_DATE_HEADER]: `true`,
+          [STREAM_CURSOR_HEADER]: responseCursor,
         })
         res.end()
         return
@@ -546,9 +563,12 @@ export class DurableStreamTestServer {
     const responseOffset = lastMessage?.offset ?? stream.currentOffset
     headers[STREAM_OFFSET_HEADER] = responseOffset
 
-    // Echo cursor if provided
-    if (cursor) {
-      headers[STREAM_CURSOR_HEADER] = cursor
+    // Generate cursor for live mode responses (Protocol Section 8.1)
+    if (live === `long-poll`) {
+      headers[STREAM_CURSOR_HEADER] = generateResponseCursor(
+        cursor,
+        this.options.cursorOptions
+      )
     }
 
     // Set up-to-date header
@@ -658,11 +678,14 @@ export class DurableStreamTestServer {
         messages[messages.length - 1]?.offset ?? stream!.currentOffset
 
       // Send control event with current offset/cursor (Protocol Section 5.7)
+      // Generate cursor for CDN cache collapsing (Protocol Section 8.1)
+      const responseCursor = generateResponseCursor(
+        cursor,
+        this.options.cursorOptions
+      )
       const controlData: Record<string, string> = {
         [SSE_OFFSET_FIELD]: controlOffset,
-      }
-      if (cursor) {
-        controlData[SSE_CURSOR_FIELD] = cursor
+        [SSE_CURSOR_FIELD]: responseCursor,
       }
 
       res.write(`event: control\n`)
@@ -685,11 +708,14 @@ export class DurableStreamTestServer {
 
         if (result.timedOut) {
           // Send keep-alive control event on timeout (Protocol Section 5.7)
+          // Generate cursor for CDN cache collapsing (Protocol Section 8.1)
+          const keepAliveCursor = generateResponseCursor(
+            cursor,
+            this.options.cursorOptions
+          )
           const keepAliveData: Record<string, string> = {
             [SSE_OFFSET_FIELD]: currentOffset,
-          }
-          if (cursor) {
-            keepAliveData[SSE_CURSOR_FIELD] = cursor
+            [SSE_CURSOR_FIELD]: keepAliveCursor,
           }
           res.write(`event: control\n`)
           res.write(encodeSSEData(JSON.stringify(keepAliveData)))
