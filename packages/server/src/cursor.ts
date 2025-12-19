@@ -15,7 +15,7 @@
  * Default epoch for cursor calculation: December 19, 2025 00:00:00 UTC.
  * This is the reference point from which intervals are counted.
  */
-export const DEFAULT_CURSOR_EPOCH = new Date(`2025-12-19T00:00:00.000Z`)
+export const DEFAULT_CURSOR_EPOCH: Date = new Date(`2025-12-19T00:00:00.000Z`)
 
 /**
  * Default interval duration in seconds.

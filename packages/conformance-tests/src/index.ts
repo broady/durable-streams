@@ -1659,7 +1659,9 @@ export function runConformanceTests(options: ConformanceTestOptions): void {
 
       // The returned cursor should be greater than the one we sent
       // (either naturally advanced to next interval, or jitter was added)
-      expect(parseInt(cursor2!, 10)).toBeGreaterThanOrEqual(parseInt(cursor1!, 10))
+      expect(parseInt(cursor2!, 10)).toBeGreaterThanOrEqual(
+        parseInt(cursor1!, 10)
+      )
     })
 
     test(`should return Stream-Cursor, Stream-Up-To-Date and Stream-Next-Offset on 204 timeout`, async () => {
@@ -2666,9 +2668,7 @@ export function runConformanceTests(options: ConformanceTestOptions): void {
       expect(response.status).toBe(200)
 
       // Parse control event to find streamCursor
-      const controlMatch = received.match(
-        /event: control\s*\ndata: ({[^}]+})/
-      )
+      const controlMatch = received.match(/event: control\s*\ndata: ({[^}]+})/)
       expect(controlMatch).toBeDefined()
 
       const controlData = JSON.parse(controlMatch![1])
@@ -2712,7 +2712,9 @@ export function runConformanceTests(options: ConformanceTestOptions): void {
       const cursor2 = JSON.parse(controlMatch2![1]).streamCursor
 
       // The returned cursor should be greater than or equal to the one we sent
-      expect(parseInt(cursor2, 10)).toBeGreaterThanOrEqual(parseInt(cursor1, 10))
+      expect(parseInt(cursor2, 10)).toBeGreaterThanOrEqual(
+        parseInt(cursor1, 10)
+      )
     })
 
     test(`should wrap JSON data in arrays for SSE and produce valid JSON`, async () => {
