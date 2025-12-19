@@ -28,13 +28,23 @@ async function fetchSSE(
     timeoutMs?: number
     maxChunks?: number
     untilContent?: string
+    signal?: AbortSignal
     headers?: Record<string, string>
   } = {}
 ): Promise<{ response: Response; received: string }> {
-  const { timeoutMs = 2000, maxChunks = 10, untilContent, headers = {} } = opts
+  const {
+    timeoutMs = 2000,
+    maxChunks = 10,
+    untilContent,
+    headers = {},
+    signal,
+  } = opts
 
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+  if (signal) {
+    signal.addEventListener(`abort`, () => controller.abort())
+  }
 
   try {
     const response = await fetch(url, {
@@ -52,11 +62,26 @@ async function fetchSSE(
     const decoder = new TextDecoder()
     let received = ``
 
+    let untilContentIndex = -1
     for (let i = 0; i < maxChunks; i++) {
       const { done, value } = await reader.read()
       if (done) break
       received += decoder.decode(value, { stream: true })
-      if (untilContent && received.includes(untilContent)) break
+      if (
+        untilContent &&
+        received.includes(untilContent) &&
+        untilContentIndex < 0
+      ) {
+        untilContentIndex = received.indexOf(untilContent)
+      }
+
+      const normalized = received.replace(/\r\n/g, `\n`)
+      if (
+        untilContentIndex >= 0 &&
+        normalized.lastIndexOf(`\n\n`) > untilContentIndex
+      ) {
+        break
+      }
     }
 
     clearTimeout(timeoutId)
@@ -2401,29 +2426,13 @@ export function runConformanceTests(options: ConformanceTestOptions): void {
       })
 
       // Make SSE request with AbortController to avoid hanging
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 1000)
+      const { response } = await fetchSSE(
+        `${getBaseUrl()}${streamPath}?offset=-1&live=sse`,
+        { headers: { Accept: `text/event-stream` }, maxChunks: 0 }
+      )
 
-      try {
-        const response = await fetch(
-          `${getBaseUrl()}${streamPath}?offset=-1&live=sse`,
-          {
-            method: `GET`,
-            headers: { Accept: `text/event-stream` },
-            signal: controller.signal,
-          }
-        )
-
-        clearTimeout(timeoutId)
-        expect(response.status).toBe(200)
-        expect(response.headers.get(`content-type`)).toBe(`text/event-stream`)
-      } catch (e) {
-        clearTimeout(timeoutId)
-        // AbortError is expected when we cancel the SSE stream
-        if (e instanceof Error && e.name !== `AbortError`) {
-          throw e
-        }
-      }
+      expect(response.status).toBe(200)
+      expect(response.headers.get(`content-type`)).toBe(`text/event-stream`)
     })
 
     test(`should accept live=sse query parameter for application/json`, async () => {
@@ -2436,29 +2445,13 @@ export function runConformanceTests(options: ConformanceTestOptions): void {
         body: JSON.stringify({ message: `hello` }),
       })
 
-      // Make SSE request with AbortController
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 1000)
+      const { response } = await fetchSSE(
+        `${getBaseUrl()}${streamPath}?offset=-1&live=sse`,
+        { headers: { Accept: `text/event-stream` }, maxChunks: 0 }
+      )
 
-      try {
-        const response = await fetch(
-          `${getBaseUrl()}${streamPath}?offset=-1&live=sse`,
-          {
-            method: `GET`,
-            headers: { Accept: `text/event-stream` },
-            signal: controller.signal,
-          }
-        )
-
-        clearTimeout(timeoutId)
-        expect(response.status).toBe(200)
-        expect(response.headers.get(`content-type`)).toBe(`text/event-stream`)
-      } catch (e) {
-        clearTimeout(timeoutId)
-        if (e instanceof Error && e.name !== `AbortError`) {
-          throw e
-        }
-      }
+      expect(response.status).toBe(200)
+      expect(response.headers.get(`content-type`)).toBe(`text/event-stream`)
     })
 
     test(`should require offset parameter for SSE mode`, async () => {
@@ -2512,44 +2505,16 @@ export function runConformanceTests(options: ConformanceTestOptions): void {
       })
 
       // Make SSE request and read the response body
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 2000)
+      const { response, received } = await fetchSSE(
+        `${getBaseUrl()}${streamPath}?offset=-1&live=sse`,
+        { untilContent: `message two` }
+      )
 
-      try {
-        const response = await fetch(
-          `${getBaseUrl()}${streamPath}?offset=-1&live=sse`,
-          {
-            method: `GET`,
-            signal: controller.signal,
-          }
-        )
+      expect(response.status).toBe(200)
 
-        expect(response.status).toBe(200)
-
-        // Read partial response
-        const reader = response.body!.getReader()
-        const decoder = new TextDecoder()
-        let received = ``
-
-        // Read a few chunks to verify SSE format
-        for (let i = 0; i < 5; i++) {
-          const { done, value } = await reader.read()
-          if (done) break
-          received += decoder.decode(value, { stream: true })
-        }
-
-        clearTimeout(timeoutId)
-        reader.cancel()
-
-        // Verify SSE format: should contain event: and data: lines
-        expect(received).toContain(`event:`)
-        expect(received).toContain(`data:`)
-      } catch (e) {
-        clearTimeout(timeoutId)
-        if (e instanceof Error && e.name !== `AbortError`) {
-          throw e
-        }
-      }
+      // Verify SSE format: should contain event: and data: lines
+      expect(received).toContain(`event:`)
+      expect(received).toContain(`data:`)
     })
 
     test(`should send control events with offset`, async () => {
@@ -2563,45 +2528,16 @@ export function runConformanceTests(options: ConformanceTestOptions): void {
       })
 
       // Make SSE request
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 2000)
+      const { response, received } = await fetchSSE(
+        `${getBaseUrl()}${streamPath}?offset=-1&live=sse`,
+        { untilContent: `event: control` }
+      )
 
-      try {
-        const response = await fetch(
-          `${getBaseUrl()}${streamPath}?offset=-1&live=sse`,
-          {
-            method: `GET`,
-            signal: controller.signal,
-          }
-        )
+      expect(response.status).toBe(200)
 
-        expect(response.status).toBe(200)
-
-        // Read response
-        const reader = response.body!.getReader()
-        const decoder = new TextDecoder()
-        let received = ``
-
-        // Read chunks until we see a control event
-        for (let i = 0; i < 10; i++) {
-          const { done, value } = await reader.read()
-          if (done) break
-          received += decoder.decode(value, { stream: true })
-          if (received.includes(`event: control`)) break
-        }
-
-        clearTimeout(timeoutId)
-        reader.cancel()
-
-        // Verify control event format (Protocol Section 5.7)
-        expect(received).toContain(`event: control`)
-        expect(received).toContain(`streamNextOffset`)
-      } catch (e) {
-        clearTimeout(timeoutId)
-        if (e instanceof Error && e.name !== `AbortError`) {
-          throw e
-        }
-      }
+      // Verify control event format (Protocol Section 5.7)
+      expect(received).toContain(`event: control`)
+      expect(received).toContain(`streamNextOffset`)
     })
 
     test(`should accept cursor parameter in SSE mode`, async () => {
@@ -2671,55 +2607,26 @@ export function runConformanceTests(options: ConformanceTestOptions): void {
       expect(httpOffset).not.toBe(`-1`) // Should be the stream's actual offset, not -1
 
       // Make SSE request
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 1000)
+      const { response, received } = await fetchSSE(
+        `${getBaseUrl()}${streamPath}?offset=-1&live=sse`,
+        { untilContent: `event: control` }
+      )
+      expect(response.status).toBe(200)
 
-      try {
-        const response = await fetch(
-          `${getBaseUrl()}${streamPath}?offset=-1&live=sse`,
-          {
-            method: `GET`,
-            signal: controller.signal,
-          }
-        )
+      // Should get a control event even for empty stream
+      expect(received).toContain(`event: control`)
 
-        expect(response.status).toBe(200)
+      // Parse the control event and verify offset matches HTTP GET
+      const controlLine = received
+        .split(`\n`)
+        .find((l) => l.startsWith(`data: `) && l.includes(`streamNextOffset`))
+      expect(controlLine).toBeDefined()
 
-        // Read a bit
-        const reader = response.body!.getReader()
-        const decoder = new TextDecoder()
-        let received = ``
+      const controlPayload = controlLine!.slice(`data: `.length)
+      const controlData = JSON.parse(controlPayload)
 
-        for (let i = 0; i < 5; i++) {
-          const { done, value } = await reader.read()
-          if (done) break
-          received += decoder.decode(value, { stream: true })
-          if (received.includes(`event: control`)) break
-        }
-
-        clearTimeout(timeoutId)
-        reader.cancel()
-
-        // Should get a control event even for empty stream
-        expect(received).toContain(`event: control`)
-
-        // Parse the control event and verify offset matches HTTP GET
-        const controlLine = received
-          .split(`\n`)
-          .find((l) => l.startsWith(`data: `) && l.includes(`streamNextOffset`))
-        expect(controlLine).toBeDefined()
-
-        const controlPayload = controlLine!.slice(`data: `.length)
-        const controlData = JSON.parse(controlPayload)
-
-        // SSE control offset should match HTTP GET offset (not -1)
-        expect(controlData[`streamNextOffset`]).toBe(httpOffset)
-      } catch (e) {
-        clearTimeout(timeoutId)
-        if (e instanceof Error && e.name !== `AbortError`) {
-          throw e
-        }
-      }
+      // SSE control offset should match HTTP GET offset (not -1)
+      expect(controlData[`streamNextOffset`]).toBe(httpOffset)
     })
 
     test(`should have correct SSE headers (no Content-Length, proper Cache-Control)`, async () => {
@@ -2733,37 +2640,22 @@ export function runConformanceTests(options: ConformanceTestOptions): void {
       })
 
       // Make SSE request
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 1000)
+      const { response } = await fetchSSE(
+        `${getBaseUrl()}${streamPath}?offset=-1&live=sse`,
+        { untilContent: `test data` }
+      )
 
-      try {
-        const response = await fetch(
-          `${getBaseUrl()}${streamPath}?offset=-1&live=sse`,
-          {
-            method: `GET`,
-            signal: controller.signal,
-          }
-        )
+      expect(response.status).toBe(200)
 
-        expect(response.status).toBe(200)
+      // SSE MUST have text/event-stream content type
+      expect(response.headers.get(`content-type`)).toBe(`text/event-stream`)
 
-        // SSE MUST have text/event-stream content type
-        expect(response.headers.get(`content-type`)).toBe(`text/event-stream`)
+      // SSE MUST NOT have Content-Length (it's a streaming response)
+      expect(response.headers.get(`content-length`)).toBeNull()
 
-        // SSE MUST NOT have Content-Length (it's a streaming response)
-        expect(response.headers.get(`content-length`)).toBeNull()
-
-        // SSE SHOULD have Cache-Control: no-cache to prevent proxy buffering
-        const cacheControl = response.headers.get(`cache-control`)
-        expect(cacheControl).toContain(`no-cache`)
-
-        clearTimeout(timeoutId)
-      } catch (e) {
-        clearTimeout(timeoutId)
-        if (e instanceof Error && e.name !== `AbortError`) {
-          throw e
-        }
-      }
+      // SSE SHOULD have Cache-Control: no-cache to prevent proxy buffering
+      const cacheControl = response.headers.get(`cache-control`)
+      expect(cacheControl).toContain(`no-cache`)
     })
 
     test(`should handle newlines in text/plain payloads`, async () => {
@@ -2810,60 +2702,28 @@ export function runConformanceTests(options: ConformanceTestOptions): void {
       }
 
       // Make SSE request
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 2000)
+      const { response, received } = await fetchSSE(
+        `${getBaseUrl()}${streamPath}?offset=-1&live=sse`,
+        { untilContent: `event: control` }
+      )
 
-      try {
-        const response = await fetch(
-          `${getBaseUrl()}${streamPath}?offset=-1&live=sse`,
-          {
-            method: `GET`,
-            signal: controller.signal,
-          }
-        )
+      expect(response.status).toBe(200)
 
-        expect(response.status).toBe(200)
+      // Extract all control event offsets
+      const controlLines = received
+        .split(`\n`)
+        .filter((l) => l.startsWith(`data: `) && l.includes(`streamNextOffset`))
 
-        // Read response
-        const reader = response.body!.getReader()
-        const decoder = new TextDecoder()
-        let received = ``
+      const offsets: Array<string> = []
+      for (const line of controlLines) {
+        const payload = line.slice(`data: `.length)
+        const data = JSON.parse(payload)
+        offsets.push(data[`streamNextOffset`])
+      }
 
-        for (let i = 0; i < 20; i++) {
-          const { done, value } = await reader.read()
-          if (done) break
-          received += decoder.decode(value, { stream: true })
-          // Wait until we've seen at least 5 data events and a control
-          const dataCount = (received.match(/event: data/g) || []).length
-          if (dataCount >= 5 && received.includes(`event: control`)) break
-        }
-
-        clearTimeout(timeoutId)
-        reader.cancel()
-
-        // Extract all control event offsets
-        const controlLines = received
-          .split(`\n`)
-          .filter(
-            (l) => l.startsWith(`data: `) && l.includes(`streamNextOffset`)
-          )
-
-        const offsets: Array<string> = []
-        for (const line of controlLines) {
-          const payload = line.slice(`data: `.length)
-          const data = JSON.parse(payload)
-          offsets.push(data[`streamNextOffset`])
-        }
-
-        // Verify offsets are unique and strictly increasing (lexicographically)
-        for (let i = 1; i < offsets.length; i++) {
-          expect(offsets[i]! > offsets[i - 1]!).toBe(true)
-        }
-      } catch (e) {
-        clearTimeout(timeoutId)
-        if (e instanceof Error && e.name !== `AbortError`) {
-          throw e
-        }
+      // Verify offsets are unique and strictly increasing (lexicographically)
+      for (let i = 1; i < offsets.length; i++) {
+        expect(offsets[i]! > offsets[i - 1]!).toBe(true)
       }
     })
 
@@ -2884,46 +2744,20 @@ export function runConformanceTests(options: ConformanceTestOptions): void {
       })
 
       // First SSE connection - get initial data and offset
-      const controller1 = new AbortController()
-      const timeoutId1 = setTimeout(() => controller1.abort(), 2000)
-
       let lastOffset: string | null = null
+      const { response: response1, received: received1 } = await fetchSSE(
+        `${getBaseUrl()}${streamPath}?offset=-1&live=sse`,
+        { untilContent: `event: control` }
+      )
 
-      try {
-        const response1 = await fetch(
-          `${getBaseUrl()}${streamPath}?offset=-1&live=sse`,
-          {
-            method: `GET`,
-            signal: controller1.signal,
-          }
-        )
+      expect(response1.status).toBe(200)
 
-        const reader1 = response1.body!.getReader()
-        const decoder = new TextDecoder()
-        let received1 = ``
-
-        for (let i = 0; i < 10; i++) {
-          const { done, value } = await reader1.read()
-          if (done) break
-          received1 += decoder.decode(value, { stream: true })
-          if (received1.includes(`event: control`)) break
-        }
-
-        clearTimeout(timeoutId1)
-        reader1.cancel()
-
-        // Extract offset from control event
-        const controlLine = received1
-          .split(`\n`)
-          .find((l) => l.startsWith(`data: `) && l.includes(`streamNextOffset`))
-        const controlPayload = controlLine!.slice(`data: `.length)
-        lastOffset = JSON.parse(controlPayload)[`streamNextOffset`]
-      } catch (e) {
-        clearTimeout(timeoutId1)
-        if (e instanceof Error && e.name !== `AbortError`) {
-          throw e
-        }
-      }
+      // Extract offset from control event
+      const controlLine = received1
+        .split(`\n`)
+        .find((l) => l.startsWith(`data: `) && l.includes(`streamNextOffset`))
+      const controlPayload = controlLine!.slice(`data: `.length)
+      lastOffset = JSON.parse(controlPayload)[`streamNextOffset`]
 
       expect(lastOffset).toBeDefined()
 
@@ -2935,43 +2769,18 @@ export function runConformanceTests(options: ConformanceTestOptions): void {
       })
 
       // Reconnect with last known offset
-      const controller2 = new AbortController()
-      const timeoutId2 = setTimeout(() => controller2.abort(), 2000)
+      const { response: response2, received: received2 } = await fetchSSE(
+        `${getBaseUrl()}${streamPath}?offset=${lastOffset}&live=sse`,
+        { untilContent: `message 3` }
+      )
 
-      try {
-        const response2 = await fetch(
-          `${getBaseUrl()}${streamPath}?offset=${lastOffset}&live=sse`,
-          {
-            method: `GET`,
-            signal: controller2.signal,
-          }
-        )
+      expect(response2.status).toBe(200)
 
-        const reader2 = response2.body!.getReader()
-        const decoder = new TextDecoder()
-        let received2 = ``
-
-        for (let i = 0; i < 10; i++) {
-          const { done, value } = await reader2.read()
-          if (done) break
-          received2 += decoder.decode(value, { stream: true })
-          if (received2.includes(`message 3`)) break
-        }
-
-        clearTimeout(timeoutId2)
-        reader2.cancel()
-
-        // Should receive message 3 (the new one), not duplicates of 1 and 2
-        expect(received2).toContain(`message 3`)
-        // Should NOT contain message 1 or 2 (already received before disconnect)
-        expect(received2).not.toContain(`message 1`)
-        expect(received2).not.toContain(`message 2`)
-      } catch (e) {
-        clearTimeout(timeoutId2)
-        if (e instanceof Error && e.name !== `AbortError`) {
-          throw e
-        }
-      }
+      // Should receive message 3 (the new one), not duplicates of 1 and 2
+      expect(received2).toContain(`message 3`)
+      // Should NOT contain message 1 or 2 (already received before disconnect)
+      expect(received2).not.toContain(`message 1`)
+      expect(received2).not.toContain(`message 2`)
     })
   })
 
