@@ -12,7 +12,27 @@ A production-ready Durable Streams server implementation built as a Caddy v2 plu
 
 ## Installation
 
-### Download Pre-built Binary
+### Quick Install (Recommended)
+
+**macOS & Linux:**
+
+```bash
+curl -sSL https://raw.githubusercontent.com/durable-streams/durable-streams/main/packages/caddy-plugin/install.sh | sh
+```
+
+**Install specific version:**
+
+```bash
+curl -sSL https://raw.githubusercontent.com/durable-streams/durable-streams/main/packages/caddy-plugin/install.sh | sh -s v0.1.0
+```
+
+**Custom install directory:**
+
+```bash
+INSTALL_DIR=~/.local/bin curl -sSL https://raw.githubusercontent.com/durable-streams/durable-streams/main/packages/caddy-plugin/install.sh | sh
+```
+
+### Manual Download
 
 Download the latest release for your platform from [GitHub Releases](https://github.com/durable-streams/durable-streams/releases):
 
@@ -38,6 +58,7 @@ sudo mv durable-streams-server /usr/local/bin/
 ```
 
 **Windows:**
+
 Download the `.zip` file from releases and extract to your PATH.
 
 ### Build from Source
