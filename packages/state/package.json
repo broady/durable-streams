@@ -31,7 +31,7 @@
   "dependencies": {
     "@durable-streams/client": "workspace:*",
     "@standard-schema/spec": "^1.0.0",
-    "@tanstack/db": "https://pkg.pr.new/TanStack/db/@tanstack/db@ce63da0"
+    "@tanstack/db": "latest"
   },
   "devDependencies": {
     "@durable-streams/server": "workspace:*",
