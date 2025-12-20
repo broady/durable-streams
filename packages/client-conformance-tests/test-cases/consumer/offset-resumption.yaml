@@ -16,40 +16,43 @@ tests:
         as: streamPath
       - action: append
         path: ${streamPath}
-        data: "chunk1"
+        data: "AAA"
+        expect:
+          storeOffsetAs: afterA
       - action: append
         path: ${streamPath}
-        data: "chunk2"
+        data: "BBB"
+        expect:
+          storeOffsetAs: afterB
       - action: append
         path: ${streamPath}
-        data: "chunk3"
+        data: "CCC"
+        expect:
+          storeOffsetAs: afterC
     operations:
-      # Read first chunk, save offset
+      # Read from afterA should get BBB and CCC
       - action: read
         path: ${streamPath}
-        maxChunks: 1
+        offset: ${afterA}
         live: false
         expect:
-          dataContains: "chunk1"
-          storeOffsetAs: offset1
-      # Read from offset1, should get chunk2 (not chunk1 again)
+          data: "BBBCCC"
+          storeOffsetAs: readOffset1
+      # Read from afterB should get only CCC
       - action: read
         path: ${streamPath}
-        offset: ${offset1}
-        maxChunks: 1
+        offset: ${afterB}
         live: false
         expect:
-          dataContains: "chunk2"
-          storeOffsetAs: offset2
-      # Read from offset2, should get chunk3
+          data: "CCC"
+          storeOffsetAs: readOffset2
+      # Read from afterC should get nothing (up-to-date)
       - action: read
         path: ${streamPath}
-        offset: ${offset2}
-        maxChunks: 1
+        offset: ${afterC}
         live: false
         expect:
-          dataContains: "chunk3"
-          storeOffsetAs: offset3
+          upToDate: true
 
   - id: offset-exact-resumption
     name: Exact resumption from offset

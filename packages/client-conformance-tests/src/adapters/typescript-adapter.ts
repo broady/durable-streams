@@ -34,10 +34,15 @@ const CLIENT_VERSION = `0.0.1`
 
 let serverUrl = ``
 
+// Track content-type per stream path for append operations
+const streamContentTypes = new Map<string, string>()
+
 async function handleCommand(command: TestCommand): Promise<TestResult> {
   switch (command.type) {
     case `init`: {
       serverUrl = command.serverUrl
+      // Clear caches on init
+      streamContentTypes.clear()
       return {
         type: `init`,
         success: true,
@@ -55,20 +60,34 @@ async function handleCommand(command: TestCommand): Promise<TestResult> {
     case `create`: {
       try {
         const url = `${serverUrl}${command.path}`
+        const contentType = command.contentType ?? `application/octet-stream`
+
+        // Check if stream already exists by trying to connect first
+        let alreadyExists = false
+        try {
+          await DurableStream.head({ url })
+          alreadyExists = true
+        } catch {
+          // Stream doesn't exist, which is expected for new creates
+        }
+
         const ds = await DurableStream.create({
           url,
-          contentType: command.contentType,
+          contentType,
           ttl: command.ttlSeconds,
           expiresAt: command.expiresAt,
           headers: command.headers,
         })
+
+        // Cache the content-type
+        streamContentTypes.set(command.path, contentType)
 
         const head = await ds.head()
 
         return {
           type: `create`,
           success: true,
-          status: 201, // We don't get the actual status from the API
+          status: alreadyExists ? 200 : 201, // 201 for new, 200 for idempotent
           offset: head.offset,
         }
       } catch (err) {
@@ -86,6 +105,11 @@ async function handleCommand(command: TestCommand): Promise<TestResult> {
 
         const head = await ds.head()
 
+        // Cache the content-type for this stream
+        if (head.contentType) {
+          streamContentTypes.set(command.path, head.contentType)
+        }
+
         return {
           type: `connect`,
           success: true,
@@ -100,7 +124,16 @@ async function handleCommand(command: TestCommand): Promise<TestResult> {
     case `append`: {
       try {
         const url = `${serverUrl}${command.path}`
-        const ds = new DurableStream({ url, headers: command.headers })
+
+        // Get content-type from cache or use default
+        const contentType =
+          streamContentTypes.get(command.path) ?? `application/octet-stream`
+
+        const ds = new DurableStream({
+          url,
+          headers: command.headers,
+          contentType,
+        })
 
         let body: Uint8Array | string
         if (command.binary) {
@@ -145,47 +178,78 @@ async function handleCommand(command: TestCommand): Promise<TestResult> {
         })
 
         const chunks: Array<ReadChunk> = []
-        let finalOffset = command.offset
-        let upToDate = false
+        let finalOffset = command.offset ?? response.offset
+        let upToDate = response.upToDate
 
-        // Collect chunks
+        // Collect chunks using body() for non-live mode or bodyStream() for live
         const maxChunks = command.maxChunks ?? 100
-        let chunkCount = 0
+        const timeoutMs = command.timeoutMs ?? 5000
 
-        if (command.waitForUpToDate) {
-          // Wait for up-to-date signal
-          for await (const chunk of response.subscribeBytes()) {
-            chunks.push({
-              data: new TextDecoder().decode(chunk.data),
-              offset: chunk.offset,
-            })
-            finalOffset = chunk.offset
-            upToDate = chunk.upToDate
-            chunkCount++
-
-            if (upToDate || chunkCount >= maxChunks) {
-              break
+        if (!live) {
+          // For non-live mode, just get all available data
+          try {
+            const data = await response.body()
+            if (data.length > 0) {
+              chunks.push({
+                data: new TextDecoder().decode(data),
+                offset: response.offset,
+              })
             }
+            finalOffset = response.offset
+            upToDate = response.upToDate
+          } catch {
+            // If body fails, stream might be empty
           }
         } else {
-          // Just read available data
-          for await (const chunk of response.subscribeBytes()) {
-            chunks.push({
-              data: new TextDecoder().decode(chunk.data),
-              offset: chunk.offset,
-            })
-            finalOffset = chunk.offset
-            upToDate = chunk.upToDate
-            chunkCount++
+          // For live mode, use bodyStream with timeout
+          const reader = response.bodyStream().getReader()
+          const decoder = new TextDecoder()
+          const startTime = Date.now()
 
-            if (chunkCount >= maxChunks) {
-              break
-            }
+          try {
+            let chunkCount = 0
+            while (chunkCount < maxChunks) {
+              // Check timeout
+              if (Date.now() - startTime > timeoutMs) {
+                break
+              }
 
-            // For non-live mode, stop when up-to-date
-            if (!command.live && upToDate) {
-              break
+              // Race between read and timeout
+              const readPromise = reader.read()
+              const timeoutPromise = new Promise<{
+                done: true
+                value: undefined
+              }>((resolve) =>
+                setTimeout(
+                  () => resolve({ done: true, value: undefined }),
+                  timeoutMs - (Date.now() - startTime)
+                )
+              )
+
+              const result = await Promise.race([readPromise, timeoutPromise])
+
+              if (result.done) {
+                break
+              }
+
+              if (result.value.length > 0) {
+                chunks.push({
+                  data: decoder.decode(result.value),
+                  offset: response.offset,
+                })
+                chunkCount++
+              }
+
+              finalOffset = response.offset
+              upToDate = response.upToDate
+
+              // For waitForUpToDate, keep going until up-to-date
+              if (command.waitForUpToDate && upToDate) {
+                break
+              }
             }
+          } finally {
+            reader.releaseLock()
           }
         }
 
@@ -213,6 +277,11 @@ async function handleCommand(command: TestCommand): Promise<TestResult> {
           headers: command.headers,
         })
 
+        // Cache content-type
+        if (result.contentType) {
+          streamContentTypes.set(command.path, result.contentType)
+        }
+
         return {
           type: `head`,
           success: true,
@@ -234,6 +303,9 @@ async function handleCommand(command: TestCommand): Promise<TestResult> {
           url,
           headers: command.headers,
         })
+
+        // Remove from cache
+        streamContentTypes.delete(command.path)
 
         return {
           type: `delete`,
@@ -272,16 +344,19 @@ function errorResult(
     let status: number | undefined
 
     // Map error codes
-    if (err.code === `stream_not_found`) {
+    if (err.code === `stream_not_found` || err.code === `NOT_FOUND`) {
       errorCode = ErrorCodes.NOT_FOUND
       status = 404
-    } else if (err.code === `conflict`) {
+    } else if (err.code === `conflict` || err.code === `CONFLICT`) {
       errorCode = ErrorCodes.CONFLICT
       status = 409
-    } else if (err.code === `sequence_conflict`) {
+    } else if (
+      err.code === `sequence_conflict` ||
+      err.code === `CONFLICT_SEQ`
+    ) {
       errorCode = ErrorCodes.SEQUENCE_CONFLICT
       status = 409
-    } else if (err.code === `invalid_offset`) {
+    } else if (err.code === `invalid_offset` || err.code === `INVALID_OFFSET`) {
       errorCode = ErrorCodes.INVALID_OFFSET
       status = 400
     }
@@ -298,13 +373,19 @@ function errorResult(
 
   if (err instanceof FetchError) {
     let errorCode: ErrorCode
+    const msg = err.message.toLowerCase()
+
     if (err.status === 404) {
       errorCode = ErrorCodes.NOT_FOUND
     } else if (err.status === 409) {
-      errorCode = ErrorCodes.CONFLICT
+      // Check for sequence conflict vs general conflict
+      if (msg.includes(`sequence`)) {
+        errorCode = ErrorCodes.SEQUENCE_CONFLICT
+      } else {
+        errorCode = ErrorCodes.CONFLICT
+      }
     } else if (err.status === 400) {
       // Check if this is an invalid offset error
-      const msg = err.message.toLowerCase()
       if (msg.includes(`offset`) || msg.includes(`invalid`)) {
         errorCode = ErrorCodes.INVALID_OFFSET
       } else {

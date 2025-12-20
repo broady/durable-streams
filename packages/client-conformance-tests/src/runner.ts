@@ -296,9 +296,10 @@ async function executeOperation(
 
     case `append-batch`: {
       const path = resolveVariables(op.path, variables)
-      // For batch, we send multiple append commands concurrently
-      const promises = op.items.map((item) =>
-        client.send({
+      // Send appends sequentially (adapter processes one command at a time)
+      const results: Array<TestResult> = []
+      for (const item of op.items) {
+        const result = await client.send({
           type: `append`,
           path,
           data: item.binaryData ?? item.data ?? ``,
@@ -306,9 +307,8 @@ async function executeOperation(
           seq: item.seq,
           headers: op.headers,
         })
-      )
-
-      const results = await Promise.all(promises)
+        results.push(result)
+      }
 
       if (verbose) {
         const succeeded = results.filter((r) => r.success).length
