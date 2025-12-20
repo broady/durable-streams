@@ -74,7 +74,7 @@ async function handleCommand(command: TestCommand): Promise<TestResult> {
         const ds = await DurableStream.create({
           url,
           contentType,
-          ttl: command.ttlSeconds,
+          ttlSeconds: command.ttlSeconds,
           expiresAt: command.expiresAt,
           headers: command.headers,
         })
@@ -142,7 +142,7 @@ async function handleCommand(command: TestCommand): Promise<TestResult> {
           body = command.data
         }
 
-        await ds.append(body, { seq: command.seq })
+        await ds.append(body, { seq: command.seq?.toString() })
         const head = await ds.head()
 
         return {
@@ -288,8 +288,7 @@ async function handleCommand(command: TestCommand): Promise<TestResult> {
           status: 200,
           offset: result.offset,
           contentType: result.contentType,
-          ttlSeconds: result.ttl,
-          expiresAt: result.expiresAt,
+          // Note: HeadResult from client doesn't expose TTL info currently
         }
       } catch (err) {
         return errorResult(`head`, err)
@@ -343,20 +342,17 @@ function errorResult(
     let errorCode: ErrorCode = ErrorCodes.INTERNAL_ERROR
     let status: number | undefined
 
-    // Map error codes
-    if (err.code === `stream_not_found` || err.code === `NOT_FOUND`) {
+    // Map error codes - use actual DurableStreamErrorCode values
+    if (err.code === `NOT_FOUND`) {
       errorCode = ErrorCodes.NOT_FOUND
       status = 404
-    } else if (err.code === `conflict` || err.code === `CONFLICT`) {
+    } else if (err.code === `CONFLICT_EXISTS`) {
       errorCode = ErrorCodes.CONFLICT
       status = 409
-    } else if (
-      err.code === `sequence_conflict` ||
-      err.code === `CONFLICT_SEQ`
-    ) {
+    } else if (err.code === `CONFLICT_SEQ`) {
       errorCode = ErrorCodes.SEQUENCE_CONFLICT
       status = 409
-    } else if (err.code === `invalid_offset` || err.code === `INVALID_OFFSET`) {
+    } else if (err.code === `BAD_REQUEST`) {
       errorCode = ErrorCodes.INVALID_OFFSET
       status = 400
     }
