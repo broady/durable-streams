@@ -234,7 +234,8 @@ async function runScenario(
   client: BenchmarkClientAdapter,
   serverUrl: string,
   clientFeatures: ClientFeatures,
-  verbose: boolean
+  verbose: boolean,
+  log: (message: string) => void
 ): Promise<ScenarioResult> {
   // Check required features
   if (scenario.requires) {
@@ -300,7 +301,7 @@ async function runScenario(
 
     // Warmup iterations
     if (verbose) {
-      console.log(`  Warmup: ${scenario.config.warmupIterations} iterations...`)
+      log(`  Warmup: ${scenario.config.warmupIterations} iterations...`)
     }
 
     for (let i = 0; i < scenario.config.warmupIterations; i++) {
@@ -315,9 +316,7 @@ async function runScenario(
 
     // Measured iterations
     if (verbose) {
-      console.log(
-        `  Measuring: ${scenario.config.measureIterations} iterations...`
-      )
+      log(`  Measuring: ${scenario.config.measureIterations} iterations...`)
     }
 
     let totalMessagesProcessed = 0
@@ -573,6 +572,15 @@ export async function runBenchmarks(
   const startTime = Date.now()
   const results: Array<ScenarioResult> = []
 
+  // When format is json, progress output goes to stderr so only JSON goes to stdout
+  const log = (message: string): void => {
+    if (options.format === `json`) {
+      process.stderr.write(message + `\n`)
+    } else {
+      console.log(message)
+    }
+  }
+
   // Filter scenarios
   let scenarios = allScenarios
   if (options.scenarios && options.scenarios.length > 0) {
@@ -586,14 +594,14 @@ export async function runBenchmarks(
     )
   }
 
-  console.log(`\nRunning ${scenarios.length} benchmark scenarios...\n`)
+  log(`\nRunning ${scenarios.length} benchmark scenarios...\n`)
 
   // Start reference server
   const server = new DurableStreamTestServer({ port: options.serverPort ?? 0 })
   await server.start()
   const serverUrl = server.url
 
-  console.log(`Reference server started at ${serverUrl}\n`)
+  log(`Reference server started at ${serverUrl}\n`)
 
   // Resolve client adapter path
   let adapterPath = options.clientAdapter
@@ -626,36 +634,37 @@ export async function runBenchmarks(
       adapterVersion = initResult.clientVersion
       clientFeatures = initResult.features ?? {}
 
-      console.log(`Client: ${adapterName} v${adapterVersion}`)
+      log(`Client: ${adapterName} v${adapterVersion}`)
       const featureList = Object.entries(clientFeatures)
         .filter(([, v]) => v)
         .map(([k]) => k)
-      console.log(`Features: ${featureList.join(`, `) || `none`}\n`)
+      log(`Features: ${featureList.join(`, `) || `none`}\n`)
     }
 
     // Run each scenario
     for (const scenario of scenarios) {
-      console.log(`\n${scenario.name}`)
-      console.log(`${`─`.repeat(scenario.name.length)}`)
-      console.log(`${scenario.description}`)
+      log(`\n${scenario.name}`)
+      log(`${`─`.repeat(scenario.name.length)}`)
+      log(`${scenario.description}`)
 
       const result = await runScenario(
         scenario,
         client,
         serverUrl,
         clientFeatures,
-        options.verbose ?? false
+        options.verbose ?? false,
+        log
       )
 
       results.push(result)
 
       if (result.skipped) {
-        console.log(`  Skipped: ${result.skipReason}`)
+        log(`  Skipped: ${result.skipReason}`)
       } else if (result.error) {
-        console.log(`  Error: ${result.error}`)
+        log(`  Error: ${result.error}`)
       } else {
         const icon = result.criteriaMet ? `✓` : `✗`
-        console.log(
+        log(
           `  ${icon} Median: ${result.stats.median.toFixed(2)}ms, P99: ${result.stats.p99.toFixed(2)}ms`
         )
       }
