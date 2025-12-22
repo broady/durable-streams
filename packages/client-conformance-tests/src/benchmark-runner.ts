@@ -63,6 +63,8 @@ export interface ScenarioResult {
   skipped: boolean
   skipReason?: string
   error?: string
+  /** Computed ops/sec for throughput scenarios */
+  opsPerSec?: number
 }
 
 export interface CriteriaResult {
@@ -346,6 +348,18 @@ async function runScenario(
       await scenario.cleanup(setupCtx)
     }
 
+    // Fail if no samples were collected (adapter errors or missing results)
+    if (durations.length === 0) {
+      return {
+        scenario,
+        stats: calculateStats([]),
+        criteriaMet: false,
+        criteriaDetails: [],
+        skipped: false,
+        error: `No benchmark samples collected (adapter returned no results)`,
+      }
+    }
+
     // Calculate statistics
     const stats = calculateStats(durations)
 
@@ -355,6 +369,17 @@ async function runScenario(
       0
     )
     const totalTimeSec = totalTimeMs / 1000
+
+    // Compute ops/sec for throughput scenarios
+    // Use actual messages processed if available, otherwise estimate from mean latency
+    let computedOpsPerSec: number | undefined
+    if (scenario.category === `throughput`) {
+      if (totalMessagesProcessed > 0 && totalTimeSec > 0) {
+        computedOpsPerSec = totalMessagesProcessed / totalTimeSec
+      } else if (stats.mean > 0) {
+        computedOpsPerSec = 1000 / stats.mean
+      }
+    }
 
     // Check criteria
     const criteriaDetails: Array<CriteriaResult> = []
@@ -384,14 +409,7 @@ async function runScenario(
       }
 
       if (scenario.criteria.minOpsPerSecond !== undefined) {
-        // For throughput scenarios, use actual messages processed
-        // For latency scenarios, use 1000/mean as ops/sec
-        let opsPerSec: number
-        if (totalMessagesProcessed > 0 && totalTimeSec > 0) {
-          opsPerSec = totalMessagesProcessed / totalTimeSec
-        } else {
-          opsPerSec = stats.mean > 0 ? 1000 / stats.mean : 0
-        }
+        const opsPerSec = computedOpsPerSec ?? 0
         const met = opsPerSec >= scenario.criteria.minOpsPerSecond
         criteriaDetails.push({
           criterion: `ops/sec >= ${scenario.criteria.minOpsPerSecond}`,
@@ -424,6 +442,7 @@ async function runScenario(
       criteriaMet,
       criteriaDetails,
       skipped: false,
+      opsPerSec: computedOpsPerSec,
     }
   } catch (err) {
     return {
@@ -543,7 +562,7 @@ function generateMarkdownReport(summary: BenchmarkSummary): string {
     lines.push(`|----------|-----------|---------|--------|`)
     for (const r of throughputResults) {
       const opsPerSec =
-        r.stats.mean > 0 ? (1000 / r.stats.mean).toFixed(0) : `N/A`
+        r.opsPerSec !== undefined ? r.opsPerSec.toFixed(0) : `N/A`
       const status = r.criteriaMet ? `Pass` : `Fail`
       lines.push(
         `| ${r.scenario.name} | ${r.stats.mean.toFixed(2)} | ${opsPerSec} | ${status} |`
@@ -572,9 +591,9 @@ export async function runBenchmarks(
   const startTime = Date.now()
   const results: Array<ScenarioResult> = []
 
-  // When format is json, progress output goes to stderr so only JSON goes to stdout
+  // When format is json or markdown, progress output goes to stderr so only the report goes to stdout
   const log = (message: string): void => {
-    if (options.format === `json`) {
+    if (options.format === `json` || options.format === `markdown`) {
       process.stderr.write(message + `\n`)
     } else {
       console.log(message)

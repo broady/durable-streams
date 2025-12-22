@@ -519,10 +519,10 @@ export function calculateStats(durationsNs: Array<bigint>): BenchmarkStats {
   const max = sorted[n - 1]!
   const mean = samplesMs.reduce((a, b) => a + b, 0) / n
 
-  // Percentiles
+  // Percentiles (nearest rank method, 0-based indexing)
   const percentile = (p: number) => {
-    const idx = Math.floor(n * p)
-    return sorted[Math.min(idx, n - 1)]!
+    const idx = Math.floor((n - 1) * p)
+    return sorted[idx]!
   }
 
   const median = percentile(0.5)

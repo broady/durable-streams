@@ -524,11 +524,8 @@ async function handleBenchmark(command: BenchmarkCommand): Promise<TestResult> {
           streamContentTypes.get(operation.path) ?? `application/octet-stream`
         const ds = new DurableStream({ url, contentType })
 
-        // Generate random payload
-        const payload = new Uint8Array(operation.size)
-        for (let i = 0; i < payload.length; i++) {
-          payload[i] = Math.floor(Math.random() * 256)
-        }
+        // Generate payload (using fill for speed - don't want to measure PRNG)
+        const payload = new Uint8Array(operation.size).fill(42)
 
         await ds.append(payload)
         metrics.bytesTransferred = operation.size
@@ -550,11 +547,8 @@ async function handleBenchmark(command: BenchmarkCommand): Promise<TestResult> {
         // Create stream first
         const ds = await DurableStream.create({ url, contentType })
 
-        // Generate payload
-        const payload = new Uint8Array(operation.size)
-        for (let i = 0; i < payload.length; i++) {
-          payload[i] = Math.floor(Math.random() * 256)
-        }
+        // Generate payload (using fill for speed - don't want to measure PRNG)
+        const payload = new Uint8Array(operation.size).fill(42)
 
         // Start reading before appending (to catch the data via live mode)
         const readPromise = (async () => {
@@ -607,11 +601,8 @@ async function handleBenchmark(command: BenchmarkCommand): Promise<TestResult> {
 
         const ds = new DurableStream({ url, contentType })
 
-        // Generate payload
-        const payload = new Uint8Array(operation.size)
-        for (let i = 0; i < payload.length; i++) {
-          payload[i] = Math.floor(Math.random() * 256)
-        }
+        // Generate payload (using fill for speed - don't want to measure PRNG)
+        const payload = new Uint8Array(operation.size).fill(42)
 
         // Send messages in concurrent batches
         const batchSize = operation.concurrency
