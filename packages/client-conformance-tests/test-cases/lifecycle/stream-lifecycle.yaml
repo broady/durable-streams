@@ -125,7 +125,7 @@ tests:
 
   - id: recreate-after-delete
     name: Create after delete
-    description: Should not be able to recreate a deleted stream at same path
+    description: Creating after delete should succeed as a new stream
     operations:
       - action: create
         as: streamPath
@@ -138,9 +138,11 @@ tests:
         path: ${streamPath}
         expect:
           status: 200
-      # Try to create at same path - should fail or be a new stream
+      # Create at same path should succeed as a new stream
       - action: create
         path: ${streamPath}
         expect:
-          # Behavior depends on implementation - may be 409 or 201
-          status: 409
+          status: 201
+    cleanup:
+      - action: delete
+        path: ${streamPath}
