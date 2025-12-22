@@ -186,7 +186,7 @@ async function handleCommand(command: TestCommand): Promise<TestResult> {
         const timeoutMs = command.timeoutMs ?? 5000
 
         if (!live) {
-          // For non-live mode, just get all available data
+          // For non-live mode, use body() to get all data
           try {
             const data = await response.body()
             if (data.length > 0) {
@@ -232,7 +232,8 @@ async function handleCommand(command: TestCommand): Promise<TestResult> {
                 break
               }
 
-              if (result.value.length > 0) {
+              const hasData = result.value.length > 0
+              if (hasData) {
                 chunks.push({
                   data: decoder.decode(result.value),
                   offset: response.offset,
@@ -243,8 +244,9 @@ async function handleCommand(command: TestCommand): Promise<TestResult> {
               finalOffset = response.offset
               upToDate = response.upToDate
 
-              // For waitForUpToDate, keep going until up-to-date
-              if (command.waitForUpToDate && upToDate) {
+              // For waitForUpToDate, only stop when we've drained all data
+              // and reached up-to-date (don't break mid-stream)
+              if (command.waitForUpToDate && upToDate && !hasData) {
                 break
               }
             }

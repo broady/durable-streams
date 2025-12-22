@@ -14,7 +14,7 @@ tests:
   - id: sse-receives-existing-data
     name: SSE receives existing data
     description: SSE stream should first deliver existing data
-    skip: "SSE adapter handling needs work - chunks not being collected properly"
+    skip: "SSE client library issue - bodyStream() closes after first chunk"
     setup:
       - action: create
         as: streamPath
