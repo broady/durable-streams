@@ -32,6 +32,13 @@ export default defineConfig({
       }),
       defineProject({
         test: {
+          name: "caddy",
+          include: ["packages/caddy-plugin/**/*.test.ts"],
+        },
+        resolve: { alias },
+      }),
+      defineProject({
+        test: {
           name: "state",
           include: ["packages/state/test/**/*.test.ts"],
           exclude: ["**/node_modules/**"],
