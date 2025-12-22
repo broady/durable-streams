@@ -14,12 +14,14 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"strconv"
+	"sync"
 	"time"
 
 	durablestreams "github.com/durable-streams/durable-streams/packages/client-go"
@@ -42,12 +44,27 @@ type Command struct {
 	Binary bool   `json:"binary,omitempty"`
 	Seq    int    `json:"seq,omitempty"`
 	// Read fields
-	Offset           string `json:"offset,omitempty"`
-	Live             any    `json:"live,omitempty"` // false | "long-poll" | "sse"
-	MaxChunks        int    `json:"maxChunks,omitempty"`
-	WaitForUpToDate  bool   `json:"waitForUpToDate,omitempty"`
+	Offset          string `json:"offset,omitempty"`
+	Live            any    `json:"live,omitempty"` // false | "long-poll" | "sse"
+	MaxChunks       int    `json:"maxChunks,omitempty"`
+	WaitForUpToDate bool   `json:"waitForUpToDate,omitempty"`
+	// Benchmark fields
+	IterationID string             `json:"iterationId,omitempty"`
+	Operation   *BenchmarkOperation `json:"operation,omitempty"`
 	// Headers
 	Headers map[string]string `json:"headers,omitempty"`
+}
+
+// BenchmarkOperation represents a benchmark operation
+type BenchmarkOperation struct {
+	Op          string `json:"op"`
+	Path        string `json:"path,omitempty"`
+	Size        int    `json:"size,omitempty"`
+	Offset      string `json:"offset,omitempty"`
+	Live        string `json:"live,omitempty"`
+	ContentType string `json:"contentType,omitempty"`
+	Count       int    `json:"count,omitempty"`
+	Concurrency int    `json:"concurrency,omitempty"`
 }
 
 // Result types sent back to test runner
@@ -67,6 +84,18 @@ type Result struct {
 	CommandType   string            `json:"commandType,omitempty"`
 	ErrorCode     string            `json:"errorCode,omitempty"`
 	Message       string            `json:"message,omitempty"`
+	// Benchmark fields
+	IterationID string           `json:"iterationId,omitempty"`
+	DurationNs  string           `json:"durationNs,omitempty"`
+	Metrics     *BenchmarkMetrics `json:"metrics,omitempty"`
+}
+
+// BenchmarkMetrics contains optional benchmark metrics
+type BenchmarkMetrics struct {
+	BytesTransferred  int     `json:"bytesTransferred,omitempty"`
+	MessagesProcessed int     `json:"messagesProcessed,omitempty"`
+	OpsPerSecond      float64 `json:"opsPerSecond,omitempty"`
+	BytesPerSecond    float64 `json:"bytesPerSecond,omitempty"`
 }
 
 type Features struct {
@@ -147,6 +176,8 @@ func handleCommand(cmd Command) Result {
 		return handleHead(cmd)
 	case "delete":
 		return handleDelete(cmd)
+	case "benchmark":
+		return handleBenchmark(cmd)
 	case "shutdown":
 		return Result{Type: "shutdown", Success: true}
 	default:
@@ -530,5 +561,222 @@ func mapErrorCode(err *durablestreams.StreamError) string {
 		return "UNEXPECTED_STATUS"
 	default:
 		return "UNEXPECTED_STATUS"
+	}
+}
+
+func handleBenchmark(cmd Command) Result {
+	if cmd.Operation == nil {
+		return sendError("benchmark", "PARSE_ERROR", "missing operation")
+	}
+
+	op := cmd.Operation
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	var durationNs int64
+	var metrics *BenchmarkMetrics
+
+	switch op.Op {
+	case "append":
+		durationNs = benchmarkAppend(ctx, op.Path, op.Size)
+
+	case "read":
+		durationNs = benchmarkRead(ctx, op.Path, op.Offset)
+
+	case "roundtrip":
+		durationNs = benchmarkRoundtrip(ctx, op.Path, op.Size, op.Live, op.ContentType)
+
+	case "create":
+		durationNs = benchmarkCreate(ctx, op.Path, op.ContentType)
+
+	case "throughput_append":
+		durationNs, metrics = benchmarkThroughputAppend(ctx, op.Path, op.Count, op.Size, op.Concurrency)
+
+	case "throughput_read":
+		durationNs, metrics = benchmarkThroughputRead(ctx, op.Path)
+
+	default:
+		return sendError("benchmark", "NOT_SUPPORTED", fmt.Sprintf("unknown benchmark op: %s", op.Op))
+	}
+
+	return Result{
+		Type:        "benchmark",
+		Success:     true,
+		IterationID: cmd.IterationID,
+		DurationNs:  strconv.FormatInt(durationNs, 10),
+		Metrics:     metrics,
+	}
+}
+
+func benchmarkAppend(ctx context.Context, path string, size int) int64 {
+	stream := client.Stream(path)
+	if ct, ok := streamContentTypes[path]; ok {
+		stream.SetContentType(ct)
+	}
+
+	data := make([]byte, size)
+	rand.Read(data)
+
+	start := time.Now()
+	_, _ = stream.Append(ctx, data)
+	return time.Since(start).Nanoseconds()
+}
+
+func benchmarkRead(ctx context.Context, path string, offset string) int64 {
+	stream := client.Stream(path)
+
+	opts := []durablestreams.ReadOption{}
+	if offset != "" {
+		opts = append(opts, durablestreams.WithOffset(durablestreams.Offset(offset)))
+	}
+
+	start := time.Now()
+	it := stream.Read(ctx, opts...)
+	defer it.Close()
+	_, _ = it.Next()
+	return time.Since(start).Nanoseconds()
+}
+
+func benchmarkRoundtrip(ctx context.Context, path string, size int, live string, contentType string) int64 {
+	stream := client.Stream(path)
+	if contentType != "" {
+		stream.SetContentType(contentType)
+	} else if ct, ok := streamContentTypes[path]; ok {
+		stream.SetContentType(ct)
+	}
+
+	data := make([]byte, size)
+	rand.Read(data)
+
+	var liveMode durablestreams.LiveMode
+	switch live {
+	case "long-poll":
+		liveMode = durablestreams.LiveModeLongPoll
+	case "sse":
+		liveMode = durablestreams.LiveModeSSE
+	default:
+		liveMode = durablestreams.LiveModeLongPoll
+	}
+
+	start := time.Now()
+
+	// Append
+	result, err := stream.Append(ctx, data)
+	if err != nil {
+		return time.Since(start).Nanoseconds()
+	}
+
+	// Read back using the offset before our append
+	// We need to read from the position before our data
+	meta, err := stream.Head(ctx)
+	if err != nil {
+		return time.Since(start).Nanoseconds()
+	}
+
+	// Calculate the offset before our append
+	nextOffsetInt, _ := strconv.Atoi(string(result.NextOffset))
+	prevOffset := strconv.Itoa(nextOffsetInt - size)
+
+	it := stream.Read(ctx,
+		durablestreams.WithOffset(durablestreams.Offset(prevOffset)),
+		durablestreams.WithLive(liveMode),
+	)
+	defer it.Close()
+	_, _ = it.Next()
+	_ = meta // silence unused warning
+
+	return time.Since(start).Nanoseconds()
+}
+
+func benchmarkCreate(ctx context.Context, path string, contentType string) int64 {
+	stream := client.Stream(path)
+
+	ct := contentType
+	if ct == "" {
+		ct = "application/octet-stream"
+	}
+
+	start := time.Now()
+	_ = stream.Create(ctx, durablestreams.WithContentType(ct))
+	streamContentTypes[path] = ct
+	return time.Since(start).Nanoseconds()
+}
+
+func benchmarkThroughputAppend(ctx context.Context, path string, count, size, concurrency int) (int64, *BenchmarkMetrics) {
+	stream := client.Stream(path)
+	if ct, ok := streamContentTypes[path]; ok {
+		stream.SetContentType(ct)
+	}
+
+	// Pre-generate all data
+	allData := make([][]byte, count)
+	for i := range allData {
+		allData[i] = make([]byte, size)
+		rand.Read(allData[i])
+	}
+
+	// Use a semaphore for concurrency control
+	sem := make(chan struct{}, concurrency)
+	var wg sync.WaitGroup
+
+	start := time.Now()
+
+	for i := 0; i < count; i++ {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(data []byte) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			_, _ = stream.Append(ctx, data)
+		}(allData[i])
+	}
+
+	wg.Wait()
+	elapsed := time.Since(start)
+
+	totalBytes := count * size
+	opsPerSec := float64(count) / elapsed.Seconds()
+	bytesPerSec := float64(totalBytes) / elapsed.Seconds()
+
+	return elapsed.Nanoseconds(), &BenchmarkMetrics{
+		BytesTransferred:  totalBytes,
+		MessagesProcessed: count,
+		OpsPerSecond:      opsPerSec,
+		BytesPerSecond:    bytesPerSec,
+	}
+}
+
+func benchmarkThroughputRead(ctx context.Context, path string) (int64, *BenchmarkMetrics) {
+	stream := client.Stream(path)
+
+	start := time.Now()
+
+	it := stream.Read(ctx, durablestreams.WithOffset(durablestreams.StartOffset))
+	defer it.Close()
+
+	var totalBytes int
+	var chunks int
+
+	for {
+		chunk, err := it.Next()
+		if errors.Is(err, durablestreams.Done) {
+			break
+		}
+		if err != nil {
+			break
+		}
+		totalBytes += len(chunk.Data)
+		chunks++
+		if chunk.UpToDate {
+			break
+		}
+	}
+
+	elapsed := time.Since(start)
+	bytesPerSec := float64(totalBytes) / elapsed.Seconds()
+
+	return elapsed.Nanoseconds(), &BenchmarkMetrics{
+		BytesTransferred: totalBytes,
+		BytesPerSecond:   bytesPerSec,
 	}
 }
