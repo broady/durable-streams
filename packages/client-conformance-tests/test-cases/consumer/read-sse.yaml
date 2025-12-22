@@ -14,7 +14,6 @@ tests:
   - id: sse-receives-existing-data
     name: SSE receives existing data
     description: SSE stream should first deliver existing data
-    skip: "SSE client library issue - bodyStream() closes after first chunk"
     setup:
       - action: create
         as: streamPath
@@ -39,7 +38,7 @@ tests:
   - id: sse-receives-new-data
     name: SSE receives new data
     description: SSE stream should receive data appended after connection
-    skip: "SSE adapter handling needs work"
+    skip: "Requires concurrent operations (runner doesn't support background writes yet)"
     setup:
       - action: create
         as: streamPath
@@ -85,7 +84,6 @@ tests:
   - id: sse-up-to-date-signal
     name: SSE signals up-to-date
     description: SSE should indicate when caught up to head
-    skip: "SSE adapter handling needs work"
     setup:
       - action: create
         as: streamPath
@@ -103,7 +101,6 @@ tests:
   - id: sse-empty-stream
     name: SSE on empty stream
     description: SSE should work on empty stream and signal up-to-date
-    skip: "SSE adapter handling needs work"
     setup:
       - action: create
         as: streamPath
@@ -119,7 +116,6 @@ tests:
   - id: sse-binary-data
     name: SSE with binary data
     description: SSE should correctly transmit binary data
-    skip: "SSE adapter handling needs work"
     setup:
       - action: create
         as: streamPath

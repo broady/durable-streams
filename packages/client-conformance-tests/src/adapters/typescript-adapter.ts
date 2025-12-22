@@ -201,58 +201,90 @@ async function handleCommand(command: TestCommand): Promise<TestResult> {
             // If body fails, stream might be empty
           }
         } else {
-          // For live mode, use bodyStream with timeout
-          const reader = response.bodyStream().getReader()
+          // For live mode, use subscribeBytes which provides per-chunk metadata
           const decoder = new TextDecoder()
           const startTime = Date.now()
+          let chunkCount = 0
+          let done = false
 
-          try {
-            let chunkCount = 0
-            while (chunkCount < maxChunks) {
+          // Create a promise that resolves when we're done collecting chunks
+          await new Promise<void>((resolve) => {
+            // Set up timeout
+            const timeoutId = setTimeout(() => {
+              done = true
+              // Capture final state from response when timing out
+              // Important for empty streams that never call subscribeBytes
+              upToDate = response.upToDate
+              finalOffset = response.offset
+              resolve()
+            }, timeoutMs)
+
+            const unsubscribe = response.subscribeBytes(async (chunk) => {
+              // Check if we should stop
+              if (done || chunkCount >= maxChunks) {
+                return
+              }
+
               // Check timeout
               if (Date.now() - startTime > timeoutMs) {
-                break
+                done = true
+                resolve()
+                return
               }
 
-              // Race between read and timeout
-              const readPromise = reader.read()
-              const timeoutPromise = new Promise<{
-                done: true
-                value: undefined
-              }>((resolve) =>
-                setTimeout(
-                  () => resolve({ done: true, value: undefined }),
-                  timeoutMs - (Date.now() - startTime)
-                )
-              )
-
-              const result = await Promise.race([readPromise, timeoutPromise])
-
-              if (result.done) {
-                break
-              }
-
-              const hasData = result.value.length > 0
+              const hasData = chunk.data.length > 0
               if (hasData) {
                 chunks.push({
-                  data: decoder.decode(result.value),
-                  offset: response.offset,
+                  data: decoder.decode(chunk.data),
+                  offset: chunk.offset,
                 })
                 chunkCount++
               }
 
-              finalOffset = response.offset
-              upToDate = response.upToDate
+              finalOffset = chunk.offset
+              upToDate = chunk.upToDate
 
-              // For waitForUpToDate, only stop when we've drained all data
-              // and reached up-to-date (don't break mid-stream)
-              if (command.waitForUpToDate && upToDate && !hasData) {
-                break
+              // For waitForUpToDate, stop when we've reached up-to-date
+              if (command.waitForUpToDate && chunk.upToDate) {
+                done = true
+                clearTimeout(timeoutId)
+                resolve()
+                return
               }
-            }
-          } finally {
-            reader.releaseLock()
-          }
+
+              // Stop if we've collected enough chunks
+              if (chunkCount >= maxChunks) {
+                done = true
+                clearTimeout(timeoutId)
+                resolve()
+              }
+            })
+
+            // Clean up subscription when done
+            // Also capture final upToDate state for empty streams
+            response.closed
+              .then(() => {
+                if (!done) {
+                  done = true
+                  clearTimeout(timeoutId)
+                  // For empty streams, capture the final upToDate from response
+                  upToDate = response.upToDate
+                  finalOffset = response.offset
+                  resolve()
+                }
+              })
+              .catch(() => {
+                if (!done) {
+                  done = true
+                  clearTimeout(timeoutId)
+                  resolve()
+                }
+              })
+
+            // Also handle the case where subscribeBytes is called
+            // We need to store unsubscribe but only call it on cleanup
+            void unsubscribe // Keep reference for potential future use
+          })
         }
 
         // Cancel the response to clean up

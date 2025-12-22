@@ -452,6 +452,7 @@ export class StreamResponseImpl<
   /**
    * Process an SSE data event by waiting for its corresponding control event.
    * In SSE protocol, control events come AFTER data events.
+   * Multiple data events may arrive before a single control event - we buffer them.
    */
   async #processSSEDataEvent(
     pendingData: string,
@@ -464,15 +465,18 @@ export class StreamResponseImpl<
       }
     | { type: `error`; error: Error }
   > {
+    // Buffer to accumulate data from multiple consecutive data events
+    let bufferedData = pendingData
+
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     while (true) {
       const { done: controlDone, value: controlEvent } =
         await sseEventIterator.next()
 
       if (controlDone) {
-        // Stream ended without control event - yield data with current state
+        // Stream ended without control event - yield buffered data with current state
         const response = this.#createSSESyntheticResponse(
-          pendingData,
+          bufferedData,
           this.offset,
           this.cursor,
           this.upToDate
@@ -499,7 +503,7 @@ export class StreamResponseImpl<
         // Update state and create response with correct metadata
         this.#updateStateFromSSEControl(controlEvent)
         const response = this.#createSSESyntheticResponse(
-          pendingData,
+          bufferedData,
           controlEvent.streamNextOffset,
           controlEvent.streamCursor,
           controlEvent.upToDate ?? false
@@ -507,15 +511,9 @@ export class StreamResponseImpl<
         return { type: `response`, response }
       }
 
-      // Got another data event before control - yield current data with current state
-      // (This is unexpected but we handle it gracefully)
-      const response = this.#createSSESyntheticResponse(
-        pendingData,
-        this.offset,
-        this.cursor,
-        this.upToDate
-      )
-      return { type: `response`, response }
+      // Got another data event before control - buffer it
+      // Server sends multiple data events followed by one control event
+      bufferedData += controlEvent.data
     }
   }
 

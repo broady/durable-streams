@@ -22,6 +22,7 @@ const STREAM_EXPIRES_AT_HEADER = `Stream-Expires-At`
 // SSE control event fields (Protocol Section 5.7)
 const SSE_OFFSET_FIELD = `streamNextOffset`
 const SSE_CURSOR_FIELD = `streamCursor`
+const SSE_UP_TO_DATE_FIELD = `upToDate`
 
 // Query params
 const OFFSET_QUERY_PARAM = `offset`
@@ -684,9 +685,14 @@ export class DurableStreamTestServer {
         cursor,
         this.options.cursorOptions
       )
-      const controlData: Record<string, string> = {
+      const controlData: Record<string, string | boolean> = {
         [SSE_OFFSET_FIELD]: controlOffset,
         [SSE_CURSOR_FIELD]: responseCursor,
+      }
+
+      // Include upToDate flag when client has caught up to head
+      if (upToDate) {
+        controlData[SSE_UP_TO_DATE_FIELD] = true
       }
 
       res.write(`event: control\n`)
@@ -714,9 +720,10 @@ export class DurableStreamTestServer {
             cursor,
             this.options.cursorOptions
           )
-          const keepAliveData: Record<string, string> = {
+          const keepAliveData: Record<string, string | boolean> = {
             [SSE_OFFSET_FIELD]: currentOffset,
             [SSE_CURSOR_FIELD]: keepAliveCursor,
+            [SSE_UP_TO_DATE_FIELD]: true, // Still caught up after timeout
           }
           res.write(`event: control\n`)
           res.write(encodeSSEData(JSON.stringify(keepAliveData)))
