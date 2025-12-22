@@ -154,6 +154,7 @@ func (s *Stream) Create(ctx context.Context, opts ...CreateOption) error {
 
 // Append writes data to the stream and returns the result.
 // The AppendResult contains the NextOffset for checkpointing.
+// Append automatically retries on transient errors (5xx, 429) with exponential backoff.
 //
 // Example:
 //
@@ -169,34 +170,39 @@ func (s *Stream) Append(ctx context.Context, data []byte, opts ...AppendOption) 
 		opt(cfg)
 	}
 
-	// Build request
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.url, bytes.NewReader(data))
-	if err != nil {
-		return nil, newStreamError("append", s.url, 0, err)
-	}
-
 	// Set content type (use cached or default)
 	contentType := s.contentType
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
-	req.Header.Set(headerContentType, contentType)
 
-	// Optional headers
-	if cfg.seq != "" {
-		req.Header.Set(headerStreamSeq, cfg.seq)
-	}
-	if cfg.ifMatch != "" {
-		req.Header.Set(headerIfMatch, cfg.ifMatch)
+	// Create request builder for retry
+	makeRequest := func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.url, bytes.NewReader(data))
+		if err != nil {
+			return nil, err
+		}
+
+		req.Header.Set(headerContentType, contentType)
+
+		// Optional headers
+		if cfg.seq != "" {
+			req.Header.Set(headerStreamSeq, cfg.seq)
+		}
+		if cfg.ifMatch != "" {
+			req.Header.Set(headerIfMatch, cfg.ifMatch)
+		}
+
+		// Custom headers
+		for k, v := range cfg.headers {
+			req.Header.Set(k, v)
+		}
+
+		return req, nil
 	}
 
-	// Custom headers
-	for k, v := range cfg.headers {
-		req.Header.Set(k, v)
-	}
-
-	// Execute request
-	resp, err := s.client.httpClient.Do(req)
+	// Execute with retry
+	resp, err := s.doWithRetry(ctx, makeRequest)
 	if err != nil {
 		return nil, newStreamError("append", s.url, 0, err)
 	}
@@ -395,8 +401,10 @@ func (s *Stream) buildReadURL(offset Offset, live LiveMode, cursor string) strin
 
 	q := u.Query()
 
-	// Add offset if not start
-	if !offset.IsStart() {
+	// Always include offset (even for start position "-1")
+	if offset.IsStart() {
+		q.Set("offset", string(StartOffset))
+	} else {
 		q.Set("offset", string(offset))
 	}
 

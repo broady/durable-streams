@@ -4,8 +4,11 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/durable-streams/durable-streams/packages/client-go/internal/sse"
 )
 
 // Chunk represents one HTTP response body from the stream.
@@ -34,6 +37,7 @@ type Chunk struct {
 //   - Propagates cursor headers for CDN compatibility
 //   - Handles 304 Not Modified responses (advances state, no error)
 //   - Handles 204 No Content for long-poll timeouts
+//   - Parses SSE events when in SSE mode
 //
 // Always call Close() when done to release resources.
 type ChunkIterator struct {
@@ -62,6 +66,11 @@ type ChunkIterator struct {
 	mu       sync.Mutex
 	closed   bool
 	doneOnce bool
+
+	// SSE state
+	sseParser   *sse.Parser
+	sseResponse *http.Response
+	ssePending  *Chunk // Pending chunk from SSE data event
 }
 
 // Next returns the next chunk of bytes from the stream.
@@ -99,6 +108,17 @@ func (it *ChunkIterator) Next() (*Chunk, error) {
 	default:
 	}
 
+	// Handle SSE mode
+	if it.live == LiveModeSSE {
+		return it.nextSSE()
+	}
+
+	// Handle catch-up and long-poll modes
+	return it.nextHTTP()
+}
+
+// nextHTTP handles regular HTTP requests (catch-up and long-poll).
+func (it *ChunkIterator) nextHTTP() (*Chunk, error) {
 	// Build the read URL
 	readURL := it.stream.buildReadURL(it.offset, it.live, it.cursor)
 
@@ -225,6 +245,169 @@ func (it *ChunkIterator) Next() (*Chunk, error) {
 	}
 }
 
+// nextSSE handles SSE streaming mode.
+func (it *ChunkIterator) nextSSE() (*Chunk, error) {
+	// If we have a pending chunk (data received, waiting for control), return it
+	it.mu.Lock()
+	if it.ssePending != nil {
+		chunk := it.ssePending
+		it.ssePending = nil
+		it.mu.Unlock()
+		return chunk, nil
+	}
+	it.mu.Unlock()
+
+	// If we don't have an active SSE connection, establish one
+	if it.sseParser == nil {
+		if err := it.establishSSEConnection(); err != nil {
+			return nil, err
+		}
+	}
+
+	// Read events from SSE stream
+	for {
+		event, err := it.sseParser.Next()
+		if err != nil {
+			// Connection closed or error - clean up and reconnect on next call
+			it.closeSSEConnection()
+
+			if err == io.EOF {
+				// Connection closed gracefully, try to reconnect
+				if it.ctx.Err() != nil {
+					return nil, it.ctx.Err()
+				}
+				// Re-establish connection and continue
+				if err := it.establishSSEConnection(); err != nil {
+					return nil, err
+				}
+				continue
+			}
+
+			if it.ctx.Err() != nil {
+				return nil, it.ctx.Err()
+			}
+			return nil, newStreamError("read", it.stream.url, 0, err)
+		}
+
+		switch e := event.(type) {
+		case sse.DataEvent:
+			// Buffer data, wait for control event to get offset.
+			// Multiple data events may arrive before a single control event - accumulate them.
+			it.mu.Lock()
+			if it.ssePending == nil {
+				it.ssePending = &Chunk{
+					Data: []byte(e.Data),
+				}
+			} else {
+				// Append to existing pending data
+				it.ssePending.Data = append(it.ssePending.Data, []byte(e.Data)...)
+			}
+			it.mu.Unlock()
+
+		case sse.ControlEvent:
+			// Update state from control event
+			it.mu.Lock()
+			it.offset = Offset(e.StreamNextOffset)
+			it.Offset = Offset(e.StreamNextOffset)
+			if e.StreamCursor != "" {
+				it.cursor = e.StreamCursor
+				it.Cursor = e.StreamCursor
+			}
+			it.UpToDate = e.UpToDate
+
+			// If we have pending data, complete and return it
+			if it.ssePending != nil {
+				chunk := it.ssePending
+				chunk.NextOffset = Offset(e.StreamNextOffset)
+				chunk.Cursor = e.StreamCursor
+				chunk.UpToDate = e.UpToDate
+				it.ssePending = nil
+				it.mu.Unlock()
+				return chunk, nil
+			}
+			it.mu.Unlock()
+
+			// Control event without data (e.g., up-to-date signal)
+			if e.UpToDate {
+				return &Chunk{
+					NextOffset: Offset(e.StreamNextOffset),
+					Cursor:     e.StreamCursor,
+					UpToDate:   true,
+				}, nil
+			}
+		}
+	}
+}
+
+// establishSSEConnection creates a new SSE connection.
+func (it *ChunkIterator) establishSSEConnection() error {
+	readURL := it.stream.buildReadURL(it.offset, LiveModeSSE, it.cursor)
+
+	req, err := http.NewRequestWithContext(it.ctx, http.MethodGet, readURL, nil)
+	if err != nil {
+		return newStreamError("read", it.stream.url, 0, err)
+	}
+
+	// Set Accept header for SSE
+	req.Header.Set("Accept", "text/event-stream")
+
+	// Set custom headers
+	for k, v := range it.headers {
+		req.Header.Set(k, v)
+	}
+
+	resp, err := it.stream.client.httpClient.Do(req)
+	if err != nil {
+		if it.ctx.Err() != nil {
+			return it.ctx.Err()
+		}
+		return newStreamError("read", it.stream.url, 0, err)
+	}
+
+	// Check response
+	switch resp.StatusCode {
+	case http.StatusOK:
+		// Verify it's actually SSE
+		contentType := resp.Header.Get("Content-Type")
+		if !strings.HasPrefix(contentType, "text/event-stream") {
+			resp.Body.Close()
+			return newStreamError("read", it.stream.url, resp.StatusCode,
+				ErrContentTypeMismatch)
+		}
+
+		it.mu.Lock()
+		it.sseResponse = resp
+		it.sseParser = sse.NewParser(resp.Body)
+		it.mu.Unlock()
+		return nil
+
+	case http.StatusBadRequest:
+		resp.Body.Close()
+		return newStreamError("read", it.stream.url, resp.StatusCode,
+			ErrContentTypeMismatch) // SSE not supported for this content type
+
+	case http.StatusNotFound:
+		resp.Body.Close()
+		return newStreamError("read", it.stream.url, resp.StatusCode, ErrStreamNotFound)
+
+	default:
+		resp.Body.Close()
+		return newStreamError("read", it.stream.url, resp.StatusCode, errorFromStatus(resp.StatusCode))
+	}
+}
+
+// closeSSEConnection closes the current SSE connection.
+func (it *ChunkIterator) closeSSEConnection() {
+	it.mu.Lock()
+	defer it.mu.Unlock()
+
+	if it.sseResponse != nil {
+		it.sseResponse.Body.Close()
+		it.sseResponse = nil
+	}
+	it.sseParser = nil
+}
+
 // Close cancels the iterator and releases resources.
 // Always call Close when done, even if iteration completed.
 // Implements io.Closer.
@@ -238,6 +421,14 @@ func (it *ChunkIterator) Close() error {
 
 	it.closed = true
 	it.cancel()
+
+	// Close SSE connection if active
+	if it.sseResponse != nil {
+		it.sseResponse.Body.Close()
+		it.sseResponse = nil
+	}
+	it.sseParser = nil
+
 	return nil
 }
 

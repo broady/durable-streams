@@ -168,7 +168,7 @@ func handleInit(cmd Command) Result {
 		ClientVersion: clientVersion,
 		Features: &Features{
 			Batching:  false, // Not implemented yet
-			SSE:       false, // Not implemented yet
+			SSE:       true,
 			LongPoll:  true,
 			Streaming: true,
 		},
