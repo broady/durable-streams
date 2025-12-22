@@ -29,7 +29,7 @@ This approach follows patterns from google-cloud-go, the most widely adopted Go 
 
 ```
 packages/client-go/
-├── go.mod                    # github.com/durable-streams/durable-streams/client-go
+├── go.mod                    # github.com/durable-streams/durable-streams/packages/client-go
 ├── go.sum
 ├── client.go                 # Client type and constructor
 ├── stream.go                 # Stream handle
@@ -352,7 +352,7 @@ import (
     "log"
     "time"
 
-    ds "github.com/durable-streams/durable-streams/client-go"
+    ds "github.com/durable-streams/durable-streams/packages/client-go"
 )
 
 func main() {
@@ -625,7 +625,7 @@ type CreateOp struct {
 **Zero external dependencies** - standard library only:
 
 ```go
-module github.com/durable-streams/durable-streams/client-go
+module github.com/durable-streams/durable-streams/packages/client-go
 
 go 1.21
 
