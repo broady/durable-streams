@@ -112,6 +112,7 @@ def error_result(command_type: str, err: Exception) -> dict[str, Any]:
 
 def handle_init(cmd: dict[str, Any]) -> dict[str, Any]:
     """Handle init command."""
+    import os
     global server_url, stream_content_types, shared_client
     server_url = cmd["serverUrl"]
     stream_content_types.clear()
@@ -121,10 +122,14 @@ def handle_init(cmd: dict[str, Any]) -> dict[str, Any]:
         shared_client.close()
     shared_client = httpx.Client(timeout=30.0)
 
+    # Check if sync mode is requested
+    use_sync = os.environ.get("DURABLE_STREAMS_SYNC", "").lower() in ("1", "true", "yes")
+    mode = "sync" if use_sync else "async"
+
     return {
         "type": "init",
         "success": True,
-        "clientName": "durable-streams-python (async)",
+        "clientName": f"durable-streams-python ({mode})",
         "clientVersion": __version__,
         "features": {
             "batching": True,
@@ -545,6 +550,7 @@ def handle_benchmark(cmd: dict[str, Any]) -> dict[str, Any]:
 
         elif op_type == "throughput_append":
             import asyncio
+            import os
             url = f"{server_url}{operation['path']}"
             content_type = stream_content_types.get(operation["path"], "application/octet-stream")
 
@@ -558,17 +564,32 @@ def handle_benchmark(cmd: dict[str, Any]) -> dict[str, Any]:
             payload = b"\x2a" * operation["size"]
 
             count = operation["count"]
+            concurrency = operation["concurrency"]
 
-            # Use asyncio for high-throughput - much more efficient than threads
-            async def run_appends():
-                from durable_streams import AsyncDurableStream
-                async with httpx.AsyncClient(timeout=30.0) as async_client:
-                    ds = AsyncDurableStream(url, content_type=content_type, client=async_client)
-                    # Submit all appends concurrently - asyncio handles this efficiently
-                    tasks = [ds.append(payload) for _ in range(count)]
-                    await asyncio.gather(*tasks)
+            # Check if sync mode is requested via environment variable
+            use_sync = os.environ.get("DURABLE_STREAMS_SYNC", "").lower() in ("1", "true", "yes")
 
-            asyncio.run(run_appends())
+            if use_sync:
+                # Sync mode: use ThreadPoolExecutor (slower but shows baseline)
+                ds = DurableStream(url, content_type=content_type, client=shared_client)
+
+                def do_append():
+                    ds.append(payload)
+
+                with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as executor:
+                    futures = [executor.submit(do_append) for _ in range(count)]
+                    concurrent.futures.wait(futures)
+            else:
+                # Async mode: use asyncio (much faster)
+                async def run_appends():
+                    from durable_streams import AsyncDurableStream
+                    async with httpx.AsyncClient(timeout=30.0) as async_client:
+                        ds = AsyncDurableStream(url, content_type=content_type, client=async_client)
+                        # Submit all appends concurrently - asyncio handles this efficiently
+                        tasks = [ds.append(payload) for _ in range(count)]
+                        await asyncio.gather(*tasks)
+
+                asyncio.run(run_appends())
 
             metrics["bytesTransferred"] = count * operation["size"]
             metrics["messagesProcessed"] = count
