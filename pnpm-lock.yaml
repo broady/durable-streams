@@ -90,6 +90,9 @@ importers:
       '@durable-streams/state':
         specifier: workspace:*
         version: link:../../../packages/state
+      '@tanstack/db':
+        specifier: latest
+        version: 0.5.15(typescript@5.9.3)
       '@tanstack/solid-db':
         specifier: latest
         version: 0.1.58(solid-js@1.9.10)(typescript@5.9.3)

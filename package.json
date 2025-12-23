@@ -17,7 +17,7 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "typecheck": "tsc --build",
+    "typecheck": "tsc --build && pnpm -r --filter '@durable-streams/example-*' typecheck",
     "prepare": "husky",
     "changeset": "changeset",
     "changeset:version": "changeset version && pnpm install --no-frozen-lockfile",
