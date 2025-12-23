@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"os"
 	"strconv"
-	"sync"
 	"time"
 
 	durablestreams "github.com/durable-streams/durable-streams/packages/client-go"
@@ -852,21 +851,24 @@ func benchmarkThroughputAppend(ctx context.Context, path string, count, size, co
 		rand.Read(allData[i])
 	}
 
-	// Submit all appends at once - let BatchedStream handle batching
-	// This matches TypeScript's Promise.all approach for fair comparison
-	var wg sync.WaitGroup
+	// Submit all appends at once using AppendAsync (no goroutines needed)
+	// This matches TypeScript's Promise.all approach - all appends are submitted
+	// synchronously, then we wait for all to complete
+	doneChans := make([]<-chan error, 0, count)
 
 	start := time.Now()
 
+	// Submit all appends without blocking (like JS Promises)
 	for i := 0; i < count; i++ {
-		wg.Add(1)
-		go func(data []byte) {
-			defer wg.Done()
-			_, _ = batched.Append(ctx, data)
-		}(allData[i])
+		done, _ := batched.AppendAsync(ctx, allData[i])
+		doneChans = append(doneChans, done)
 	}
 
-	wg.Wait()
+	// Wait for all to complete (like Promise.all)
+	for _, done := range doneChans {
+		<-done
+	}
+
 	elapsed := time.Since(start)
 
 	totalBytes := count * size

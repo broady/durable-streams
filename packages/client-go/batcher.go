@@ -69,6 +69,40 @@ func (bs *BatchedStream) Stream() *Stream {
 // Multiple concurrent Append calls may be combined into a single HTTP request.
 // Returns when the data has been successfully written to the server.
 func (bs *BatchedStream) Append(ctx context.Context, data []byte, opts ...AppendOption) (*AppendResult, error) {
+	done, err := bs.AppendAsync(ctx, data, opts...)
+	if err != nil {
+		return nil, err
+	}
+
+	// Wait for completion
+	select {
+	case err := <-done:
+		if err != nil {
+			return nil, err
+		}
+		return &AppendResult{}, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// AppendAsync writes data to the stream with automatic batching, returning immediately.
+// Returns a channel that will receive nil on success or an error on failure.
+// This allows submitting many appends without blocking, similar to JavaScript Promises.
+//
+// Example:
+//
+//	// Submit all appends without blocking
+//	var doneChans []<-chan error
+//	for _, data := range items {
+//	    done, _ := batched.AppendAsync(ctx, data)
+//	    doneChans = append(doneChans, done)
+//	}
+//	// Wait for all to complete
+//	for _, done := range doneChans {
+//	    <-done
+//	}
+func (bs *BatchedStream) AppendAsync(ctx context.Context, data []byte, opts ...AppendOption) (<-chan error, error) {
 	if len(data) == 0 {
 		return nil, newStreamError("append", bs.stream.url, 0, ErrEmptyAppend)
 	}
@@ -109,18 +143,7 @@ func (bs *BatchedStream) Append(ctx context.Context, data []byte, opts ...Append
 		bs.mu.Unlock()
 	}
 
-	// Wait for completion
-	select {
-	case err := <-pending.done:
-		if err != nil {
-			return nil, err
-		}
-		// Note: BatchedStream doesn't return individual offsets per append
-		// since multiple appends share one response. Return empty result.
-		return &AppendResult{}, nil
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
+	return pending.done, nil
 }
 
 // AppendJSON writes JSON data to the stream with automatic batching.
