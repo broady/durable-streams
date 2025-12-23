@@ -6,3 +6,5 @@ pnpm-lock.yaml
 .output
 .changeset
 examples/test-ui/src/routeTree.gen.ts
+packages/client-py
+scripts

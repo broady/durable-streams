@@ -113,6 +113,120 @@ export interface ShutdownCommand {
   type: `shutdown`
 }
 
+// =============================================================================
+// Dynamic Headers/Params Commands
+// =============================================================================
+
+/**
+ * Configure a dynamic header that is evaluated per-request.
+ * The adapter should store this and apply it to subsequent operations.
+ *
+ * This tests the client's ability to support header functions for scenarios
+ * like OAuth token refresh, request correlation IDs, etc.
+ */
+export interface SetDynamicHeaderCommand {
+  type: `set-dynamic-header`
+  /** Header name to set */
+  name: string
+  /** Type of dynamic value */
+  valueType: `counter` | `timestamp` | `token`
+  /** Initial value (for token type) */
+  initialValue?: string
+}
+
+/**
+ * Configure a dynamic URL parameter that is evaluated per-request.
+ */
+export interface SetDynamicParamCommand {
+  type: `set-dynamic-param`
+  /** Param name to set */
+  name: string
+  /** Type of dynamic value */
+  valueType: `counter` | `timestamp`
+}
+
+/**
+ * Clear all dynamic headers and params.
+ */
+export interface ClearDynamicCommand {
+  type: `clear-dynamic`
+}
+
+// =============================================================================
+// Benchmark Commands
+// =============================================================================
+
+/**
+ * Execute a timed benchmark operation.
+ * The adapter times the operation internally using high-resolution timing.
+ */
+export interface BenchmarkCommand {
+  type: `benchmark`
+  /** Unique ID for this benchmark iteration */
+  iterationId: string
+  /** The operation to benchmark */
+  operation: BenchmarkOperation
+}
+
+/**
+ * Benchmark operation types - what to measure.
+ */
+export type BenchmarkOperation =
+  | BenchmarkAppendOp
+  | BenchmarkReadOp
+  | BenchmarkRoundtripOp
+  | BenchmarkCreateOp
+  | BenchmarkThroughputAppendOp
+  | BenchmarkThroughputReadOp
+
+export interface BenchmarkAppendOp {
+  op: `append`
+  path: string
+  /** Size in bytes - adapter generates random payload */
+  size: number
+}
+
+export interface BenchmarkReadOp {
+  op: `read`
+  path: string
+  offset?: string
+}
+
+export interface BenchmarkRoundtripOp {
+  op: `roundtrip`
+  path: string
+  /** Size in bytes */
+  size: number
+  /** Live mode for reading */
+  live?: `long-poll` | `sse`
+  /** Content type for SSE compatibility */
+  contentType?: string
+}
+
+export interface BenchmarkCreateOp {
+  op: `create`
+  path: string
+  contentType?: string
+}
+
+export interface BenchmarkThroughputAppendOp {
+  op: `throughput_append`
+  path: string
+  /** Number of messages to send */
+  count: number
+  /** Size per message in bytes */
+  size: number
+  /** Concurrency level */
+  concurrency: number
+}
+
+export interface BenchmarkThroughputReadOp {
+  op: `throughput_read`
+  path: string
+  /** Expected bytes to read (for validation) */
+  expectedBytes?: number
+}
+
 /**
  * All possible commands from test runner to client.
  */
@@ -125,6 +239,10 @@ export type TestCommand =
   | HeadCommand
   | DeleteCommand
   | ShutdownCommand
+  | SetDynamicHeaderCommand
+  | SetDynamicParamCommand
+  | ClearDynamicCommand
+  | BenchmarkCommand
 
 // =============================================================================
 // Results (sent from client adapter to test runner via stdout)
@@ -150,6 +268,8 @@ export interface InitResult {
     longPoll?: boolean
     /** Supports streaming reads */
     streaming?: boolean
+    /** Supports dynamic headers/params (functions evaluated per-request) */
+    dynamicHeaders?: boolean
   }
 }
 
@@ -187,7 +307,12 @@ export interface AppendResult {
   status: number
   /** New offset after append */
   offset?: string
+  /** Response headers */
   headers?: Record<string, string>
+  /** Headers that were sent in the request (for dynamic header testing) */
+  headersSent?: Record<string, string>
+  /** Params that were sent in the request (for dynamic param testing) */
+  paramsSent?: Record<string, string>
 }
 
 /**
@@ -217,7 +342,12 @@ export interface ReadResult {
   upToDate?: boolean
   /** Cursor value if provided */
   cursor?: string
+  /** Response headers */
   headers?: Record<string, string>
+  /** Headers that were sent in the request (for dynamic header testing) */
+  headersSent?: Record<string, string>
+  /** Params that were sent in the request (for dynamic param testing) */
+  paramsSent?: Record<string, string>
 }
 
 /**
@@ -257,6 +387,52 @@ export interface ShutdownResult {
 }
 
 /**
+ * Successful set-dynamic-header result.
+ */
+export interface SetDynamicHeaderResult {
+  type: `set-dynamic-header`
+  success: true
+}
+
+/**
+ * Successful set-dynamic-param result.
+ */
+export interface SetDynamicParamResult {
+  type: `set-dynamic-param`
+  success: true
+}
+
+/**
+ * Successful clear-dynamic result.
+ */
+export interface ClearDynamicResult {
+  type: `clear-dynamic`
+  success: true
+}
+
+/**
+ * Successful benchmark result with timing.
+ */
+export interface BenchmarkResult {
+  type: `benchmark`
+  success: true
+  iterationId: string
+  /** Timing in nanoseconds (as string since bigint doesn't JSON serialize) */
+  durationNs: string
+  /** Optional metrics */
+  metrics?: {
+    /** Bytes transferred */
+    bytesTransferred?: number
+    /** Messages processed */
+    messagesProcessed?: number
+    /** Operations per second (for throughput tests) */
+    opsPerSecond?: number
+    /** Bytes per second (for throughput tests) */
+    bytesPerSecond?: number
+  }
+}
+
+/**
  * Error result for any failed operation.
  */
 export interface ErrorResult {
@@ -286,6 +462,10 @@ export type TestResult =
   | HeadResult
   | DeleteResult
   | ShutdownResult
+  | SetDynamicHeaderResult
+  | SetDynamicParamResult
+  | ClearDynamicResult
+  | BenchmarkResult
   | ErrorResult
 
 // =============================================================================
@@ -361,3 +541,116 @@ export const ErrorCodes = {
 } as const
 
 export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes]
+
+// =============================================================================
+// Benchmark Statistics
+// =============================================================================
+
+/**
+ * Statistical summary of benchmark results.
+ */
+export interface BenchmarkStats {
+  /** Minimum value in milliseconds */
+  min: number
+  /** Maximum value in milliseconds */
+  max: number
+  /** Arithmetic mean in milliseconds */
+  mean: number
+  /** Median (p50) in milliseconds */
+  median: number
+  /** 75th percentile in milliseconds */
+  p75: number
+  /** 95th percentile in milliseconds */
+  p95: number
+  /** 99th percentile in milliseconds */
+  p99: number
+  /** Standard deviation in milliseconds */
+  stdDev: number
+  /** Margin of error (95% confidence) in milliseconds */
+  marginOfError: number
+  /** Number of samples */
+  sampleCount: number
+}
+
+/**
+ * Calculate statistics from an array of durations in nanoseconds.
+ */
+export function calculateStats(durationsNs: Array<bigint>): BenchmarkStats {
+  if (durationsNs.length === 0) {
+    return {
+      min: 0,
+      max: 0,
+      mean: 0,
+      median: 0,
+      p75: 0,
+      p95: 0,
+      p99: 0,
+      stdDev: 0,
+      marginOfError: 0,
+      sampleCount: 0,
+    }
+  }
+
+  // Convert to milliseconds for statistics
+  const samplesMs = durationsNs.map((ns) => Number(ns) / 1_000_000)
+  const sorted = [...samplesMs].sort((a, b) => a - b)
+  const n = sorted.length
+
+  const min = sorted[0]!
+  const max = sorted[n - 1]!
+  const mean = samplesMs.reduce((a, b) => a + b, 0) / n
+
+  // Percentiles (nearest rank method, 0-based indexing)
+  const percentile = (p: number) => {
+    const idx = Math.floor((n - 1) * p)
+    return sorted[idx]!
+  }
+
+  const median = percentile(0.5)
+  const p75 = percentile(0.75)
+  const p95 = percentile(0.95)
+  const p99 = percentile(0.99)
+
+  // Standard deviation
+  const squaredDiffs = samplesMs.map((v) => Math.pow(v - mean, 2))
+  const variance = squaredDiffs.reduce((a, b) => a + b, 0) / n
+  const stdDev = Math.sqrt(variance)
+
+  // Margin of error (95% confidence, z = 1.96)
+  const marginOfError = (1.96 * stdDev) / Math.sqrt(n)
+
+  return {
+    min,
+    max,
+    mean,
+    median,
+    p75,
+    p95,
+    p99,
+    stdDev,
+    marginOfError,
+    sampleCount: n,
+  }
+}
+
+/**
+ * Format a BenchmarkStats object for display.
+ */
+export function formatStats(
+  stats: BenchmarkStats,
+  unit = `ms`
+): Record<string, string> {
+  const fmt = (v: number) => `${v.toFixed(2)} ${unit}`
+  return {
+    Min: fmt(stats.min),
+    Max: fmt(stats.max),
+    Mean: fmt(stats.mean),
+    Median: fmt(stats.median),
+    P75: fmt(stats.p75),
+    P95: fmt(stats.p95),
+    P99: fmt(stats.p99),
+    StdDev: fmt(stats.stdDev),
+    "Margin of Error": fmt(stats.marginOfError),
+    Samples: stats.sampleCount.toString(),
+  }
+}

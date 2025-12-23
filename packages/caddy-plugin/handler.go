@@ -422,7 +422,7 @@ func (h *Handler) handleSSE(w http.ResponseWriter, r *http.Request, path string,
 			return nil
 		default:
 			// Read any available messages
-			messages, _, err := h.store.Read(path, currentOffset)
+			messages, upToDate, err := h.store.Read(path, currentOffset)
 			if err != nil {
 				return err
 			}
@@ -442,10 +442,13 @@ func (h *Handler) handleSSE(w http.ResponseWriter, r *http.Request, path string,
 				// Generate cursor with collision handling
 				responseCursor := generateResponseCursor(cursor)
 
-				// Send control event
-				control := map[string]string{
+				// Send control event with upToDate flag when caught up
+				control := map[string]interface{}{
 					"streamNextOffset": currentOffset.String(),
 					"streamCursor":     responseCursor,
+				}
+				if upToDate {
+					control["upToDate"] = true
 				}
 				controlJSON, _ := json.Marshal(control)
 				fmt.Fprintf(w, "event: control\n")
@@ -460,9 +463,11 @@ func (h *Handler) handleSSE(w http.ResponseWriter, r *http.Request, path string,
 				// Generate cursor with collision handling
 				responseCursor := generateResponseCursor(cursor)
 
-				control := map[string]string{
+				// For initial control without messages, we're at the current offset (up to date)
+				control := map[string]interface{}{
 					"streamNextOffset": currentMeta.CurrentOffset.String(),
 					"streamCursor":     responseCursor,
+					"upToDate":         true,
 				}
 				controlJSON, _ := json.Marshal(control)
 				fmt.Fprintf(w, "event: control\n")

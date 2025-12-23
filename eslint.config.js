@@ -17,6 +17,8 @@ export default [
       `**/tsdown.config.ts`,
       `**/tsup.config.ts`,
       `packages/caddy-plugin/**`,
+      `packages/client-py/**`,
+      `scripts/**`,
     ],
   },
   {
