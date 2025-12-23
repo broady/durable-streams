@@ -423,6 +423,163 @@ def handle_shutdown(_cmd: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def handle_benchmark(cmd: dict[str, Any]) -> dict[str, Any]:
+    """Handle benchmark command with high-resolution timing."""
+    import concurrent.futures
+    import time
+
+    iteration_id = cmd["iterationId"]
+    operation = cmd["operation"]
+    op_type = operation["op"]
+
+    metrics: dict[str, Any] = {}
+
+    try:
+        start_time = time.perf_counter_ns()
+
+        if op_type == "append":
+            url = f"{server_url}{operation['path']}"
+            content_type = stream_content_types.get(operation["path"], "application/octet-stream")
+            ds = DurableStream(url, content_type=content_type)
+
+            # Generate payload (using bytes filled with 42 for speed)
+            payload = bytes([42] * operation["size"])
+
+            ds.append(payload)
+            ds.close()
+            metrics["bytesTransferred"] = operation["size"]
+
+        elif op_type == "read":
+            url = f"{server_url}{operation['path']}"
+            offset = operation.get("offset")
+
+            with stream(url, offset=offset, live=False) as res:
+                data = res.read_bytes()
+                metrics["bytesTransferred"] = len(data) if data else 0
+
+        elif op_type == "roundtrip":
+            url = f"{server_url}{operation['path']}"
+            content_type = operation.get("contentType", "application/octet-stream")
+            live_mode = operation.get("live", "long-poll")
+
+            # Create stream first
+            ds = DurableStream.create(url, content_type=content_type)
+
+            # Generate payload
+            payload = bytes([42] * operation["size"])
+
+            # Start reading before appending (to catch the data via live mode)
+            # We need to use threading for this since stream() is blocking
+            import threading
+
+            read_data: bytes | None = None
+            read_error: Exception | None = None
+
+            def read_thread():
+                nonlocal read_data, read_error
+                try:
+                    with ds.stream(live=live_mode) as res:
+                        for chunk in res:
+                            if chunk:
+                                read_data = chunk
+                                break
+                except Exception as e:
+                    read_error = e
+
+            reader = threading.Thread(target=read_thread)
+            reader.start()
+
+            # Give the reader a moment to start
+            time.sleep(0.01)
+
+            # Append the data
+            ds.append(payload)
+
+            # Wait for read to complete (with timeout)
+            reader.join(timeout=10.0)
+
+            ds.close()
+
+            if read_error:
+                raise read_error
+
+            read_len = len(read_data) if read_data else 0
+            metrics["bytesTransferred"] = operation["size"] + read_len
+
+        elif op_type == "create":
+            url = f"{server_url}{operation['path']}"
+            content_type = operation.get("contentType", "application/octet-stream")
+            ds = DurableStream.create(url, content_type=content_type)
+            ds.close()
+
+        elif op_type == "throughput_append":
+            url = f"{server_url}{operation['path']}"
+            content_type = stream_content_types.get(operation["path"], "application/octet-stream")
+
+            # Ensure stream exists
+            try:
+                DurableStream.create(url, content_type=content_type)
+            except StreamExistsError:
+                pass
+
+            ds = DurableStream(url, content_type=content_type)
+
+            # Generate payload
+            payload = bytes([42] * operation["size"])
+
+            # Send messages in concurrent batches using ThreadPoolExecutor
+            count = operation["count"]
+            concurrency = operation["concurrency"]
+
+            def do_append():
+                ds.append(payload)
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as executor:
+                futures = [executor.submit(do_append) for _ in range(count)]
+                concurrent.futures.wait(futures)
+
+            ds.close()
+
+            metrics["bytesTransferred"] = count * operation["size"]
+            metrics["messagesProcessed"] = count
+
+        elif op_type == "throughput_read":
+            url = f"{server_url}{operation['path']}"
+
+            with stream(url, live=False) as res:
+                data = res.read_bytes()
+                metrics["bytesTransferred"] = len(data) if data else 0
+
+        else:
+            return {
+                "type": "error",
+                "success": False,
+                "commandType": "benchmark",
+                "errorCode": ERROR_CODES["NOT_SUPPORTED"],
+                "message": f"Unknown benchmark operation: {op_type}",
+            }
+
+        end_time = time.perf_counter_ns()
+        duration_ns = end_time - start_time
+
+        return {
+            "type": "benchmark",
+            "success": True,
+            "iterationId": iteration_id,
+            "durationNs": str(duration_ns),
+            "metrics": metrics,
+        }
+
+    except Exception as e:
+        return {
+            "type": "error",
+            "success": False,
+            "commandType": "benchmark",
+            "errorCode": ERROR_CODES["INTERNAL_ERROR"],
+            "message": str(e),
+        }
+
+
 def handle_command(cmd: dict[str, Any]) -> dict[str, Any]:
     """Route command to appropriate handler."""
     cmd_type = cmd["type"]
@@ -444,6 +601,8 @@ def handle_command(cmd: dict[str, Any]) -> dict[str, Any]:
             return handle_delete(cmd)
         elif cmd_type == "shutdown":
             return handle_shutdown(cmd)
+        elif cmd_type == "benchmark":
+            return handle_benchmark(cmd)
         else:
             return {
                 "type": "error",

@@ -67,6 +67,12 @@ jobs:
           go-version: "1.25"
           cache-dependency-path: packages/client-go/go.mod
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        run: uv python install 3.12
+
       - name: Install dependencies
         run: pnpm install
 
@@ -78,6 +84,11 @@ jobs:
           cd packages/client-go
           go build -o conformance-adapter ./cmd/conformance-adapter
 
+      - name: Install Python client
+        run: |
+          cd packages/client-py
+          uv sync
+
       - name: Run TypeScript client benchmarks
         id: ts_benchmarks
         continue-on-error: true
@@ -85,6 +96,15 @@ jobs:
           cd packages/client-conformance-tests
           pnpm tsx src/cli.ts --bench ts --format json > benchmark-results-ts.json
           cat benchmark-results-ts.json
+
+          # Extract summary for PR comment
+          PASSED=$(jq -r '.passed // 0' benchmark-results-ts.json)
+          FAILED=$(jq -r '.failed // 0' benchmark-results-ts.json)
+          SKIPPED=$(jq -r '.skipped // 0' benchmark-results-ts.json)
+
+          echo "ts_passed=$PASSED" >> $GITHUB_OUTPUT
+          echo "ts_failed=$FAILED" >> $GITHUB_OUTPUT
+          echo "ts_skipped=$SKIPPED" >> $GITHUB_OUTPUT
 
       - name: Run Go client benchmarks
         id: go_benchmarks
@@ -94,21 +114,31 @@ jobs:
           pnpm tsx src/cli.ts --bench ../../packages/client-go/conformance-adapter --format json > benchmark-results-go.json
           cat benchmark-results-go.json
 
-      - name: Combine benchmark results
-        id: benchmarks
+          # Extract summary for PR comment
+          PASSED=$(jq -r '.passed // 0' benchmark-results-go.json)
+          FAILED=$(jq -r '.failed // 0' benchmark-results-go.json)
+          SKIPPED=$(jq -r '.skipped // 0' benchmark-results-go.json)
+
+          echo "go_passed=$PASSED" >> $GITHUB_OUTPUT
+          echo "go_failed=$FAILED" >> $GITHUB_OUTPUT
+          echo "go_skipped=$SKIPPED" >> $GITHUB_OUTPUT
+
+      - name: Run Python client benchmarks
+        id: py_benchmarks
+        continue-on-error: true
         run: |
           cd packages/client-conformance-tests
-          # Combine results for summary
-          TS_PASSED=$(jq -r '.passed // 0' benchmark-results-ts.json)
-          TS_FAILED=$(jq -r '.failed // 0' benchmark-results-ts.json)
-          GO_PASSED=$(jq -r '.passed // 0' benchmark-results-go.json)
-          GO_FAILED=$(jq -r '.failed // 0' benchmark-results-go.json)
+          pnpm tsx src/cli.ts --bench ../client-py/run-conformance-adapter.sh --format json > benchmark-results-py.json
+          cat benchmark-results-py.json
 
-          TOTAL_PASSED=$((TS_PASSED + GO_PASSED))
-          TOTAL_FAILED=$((TS_FAILED + GO_FAILED))
+          # Extract summary for PR comment
+          PASSED=$(jq -r '.passed // 0' benchmark-results-py.json)
+          FAILED=$(jq -r '.failed // 0' benchmark-results-py.json)
+          SKIPPED=$(jq -r '.skipped // 0' benchmark-results-py.json)
 
-          echo "passed=$TOTAL_PASSED" >> $GITHUB_OUTPUT
-          echo "failed=$TOTAL_FAILED" >> $GITHUB_OUTPUT
+          echo "py_passed=$PASSED" >> $GITHUB_OUTPUT
+          echo "py_failed=$FAILED" >> $GITHUB_OUTPUT
+          echo "py_skipped=$SKIPPED" >> $GITHUB_OUTPUT
 
       - name: Upload benchmark results
         if: always()
@@ -118,18 +148,30 @@ jobs:
           path: |
             packages/client-conformance-tests/benchmark-results-ts.json
             packages/client-conformance-tests/benchmark-results-go.json
+            packages/client-conformance-tests/benchmark-results-py.json
 
       - name: Generate benchmark report
         if: always() && github.event_name == 'pull_request'
         run: |
           cd packages/client-conformance-tests
+
           echo "# Client Benchmark Results" > benchmark-report.md
           echo "" >> benchmark-report.md
+
           echo "## TypeScript Client" >> benchmark-report.md
-          pnpm tsx src/cli.ts --bench ts --format markdown >> benchmark-report.md
+          echo "" >> benchmark-report.md
+          pnpm tsx src/cli.ts --bench ts --format markdown | tail -n +2 >> benchmark-report.md
+
           echo "" >> benchmark-report.md
           echo "## Go Client" >> benchmark-report.md
-          pnpm tsx src/cli.ts --bench ../../packages/client-go/conformance-adapter --format markdown >> benchmark-report.md
+          echo "" >> benchmark-report.md
+          pnpm tsx src/cli.ts --bench ../../packages/client-go/conformance-adapter --format markdown | tail -n +2 >> benchmark-report.md
+
+          echo "" >> benchmark-report.md
+          echo "## Python Client" >> benchmark-report.md
+          echo "" >> benchmark-report.md
+          pnpm tsx src/cli.ts --bench ../client-py/run-conformance-adapter.sh --format markdown | tail -n +2 >> benchmark-report.md
+
           cat benchmark-report.md
 
       - name: Comment on PR with benchmark results
@@ -172,9 +214,14 @@ jobs:
 
       - name: Check benchmark criteria
         run: |
-          FAILED=${{ steps.benchmarks.outputs.failed }}
-          if [ "$FAILED" -gt 0 ]; then
-            echo "::error::$FAILED benchmark(s) failed to meet performance criteria"
+          TS_FAILED=${{ steps.ts_benchmarks.outputs.ts_failed }}
+          GO_FAILED=${{ steps.go_benchmarks.outputs.go_failed }}
+          PY_FAILED=${{ steps.py_benchmarks.outputs.py_failed }}
+
+          TOTAL_FAILED=$((TS_FAILED + GO_FAILED + PY_FAILED))
+
+          if [ "$TOTAL_FAILED" -gt 0 ]; then
+            echo "::error::$TOTAL_FAILED benchmark(s) failed to meet performance criteria (TS: $TS_FAILED, Go: $GO_FAILED, Python: $PY_FAILED)"
             exit 1
           fi
           echo "All benchmarks passed!"
