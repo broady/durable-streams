@@ -1,6 +1,6 @@
 ---
-"@durable-streams/server-conformance-tests": minor
-"@durable-streams/server": minor
+"@durable-streams/server-conformance-tests": patch
+"@durable-streams/server": patch
 ---
 
 Add TTL expiration conformance tests and implement expiration in stores
