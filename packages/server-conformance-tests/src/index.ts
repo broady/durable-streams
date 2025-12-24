@@ -1907,8 +1907,13 @@ export function runConformanceTests(options: ConformanceTestOptions): void {
     const sleep = (ms: number) =>
       new Promise((resolve) => setTimeout(resolve, ms))
 
-    test(`should return 404 on HEAD after TTL expires`, async () => {
-      const streamPath = `/v1/stream/ttl-expire-head-test-${Date.now()}`
+    // Helper to generate unique stream paths for concurrent tests
+    const uniquePath = (prefix: string) =>
+      `/v1/stream/${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`
+
+    // Run tests concurrently to avoid 6x 1.5s wait time
+    test.concurrent(`should return 404 on HEAD after TTL expires`, async () => {
+      const streamPath = uniquePath(`ttl-expire-head`)
 
       // Create stream with 1 second TTL
       const createResponse = await fetch(`${getBaseUrl()}${streamPath}`, {
@@ -1936,8 +1941,8 @@ export function runConformanceTests(options: ConformanceTestOptions): void {
       expect(headAfter.status).toBe(404)
     })
 
-    test(`should return 404 on GET after TTL expires`, async () => {
-      const streamPath = `/v1/stream/ttl-expire-get-test-${Date.now()}`
+    test.concurrent(`should return 404 on GET after TTL expires`, async () => {
+      const streamPath = uniquePath(`ttl-expire-get`)
 
       // Create stream with 1 second TTL and some data
       const createResponse = await fetch(`${getBaseUrl()}${streamPath}`, {
@@ -1966,133 +1971,145 @@ export function runConformanceTests(options: ConformanceTestOptions): void {
       expect(getAfter.status).toBe(404)
     })
 
-    test(`should return 404 on POST append after TTL expires`, async () => {
-      const streamPath = `/v1/stream/ttl-expire-post-test-${Date.now()}`
+    test.concurrent(
+      `should return 404 on POST append after TTL expires`,
+      async () => {
+        const streamPath = uniquePath(`ttl-expire-post`)
 
-      // Create stream with 1 second TTL
-      const createResponse = await fetch(`${getBaseUrl()}${streamPath}`, {
-        method: `PUT`,
-        headers: {
-          "Content-Type": `text/plain`,
-          "Stream-TTL": `1`,
-        },
-      })
-      expect(createResponse.status).toBe(201)
+        // Create stream with 1 second TTL
+        const createResponse = await fetch(`${getBaseUrl()}${streamPath}`, {
+          method: `PUT`,
+          headers: {
+            "Content-Type": `text/plain`,
+            "Stream-TTL": `1`,
+          },
+        })
+        expect(createResponse.status).toBe(201)
 
-      // Verify append works immediately
-      const postBefore = await fetch(`${getBaseUrl()}${streamPath}`, {
-        method: `POST`,
-        headers: { "Content-Type": `text/plain` },
-        body: `appended data`,
-      })
-      expect([200, 204]).toContain(postBefore.status)
+        // Verify append works immediately
+        const postBefore = await fetch(`${getBaseUrl()}${streamPath}`, {
+          method: `POST`,
+          headers: { "Content-Type": `text/plain` },
+          body: `appended data`,
+        })
+        expect([200, 204]).toContain(postBefore.status)
 
-      // Wait for TTL to expire
-      await sleep(1500)
+        // Wait for TTL to expire
+        await sleep(1500)
 
-      // Append should fail - stream no longer exists
-      const postAfter = await fetch(`${getBaseUrl()}${streamPath}`, {
-        method: `POST`,
-        headers: { "Content-Type": `text/plain` },
-        body: `more data`,
-      })
-      expect(postAfter.status).toBe(404)
-    })
+        // Append should fail - stream no longer exists
+        const postAfter = await fetch(`${getBaseUrl()}${streamPath}`, {
+          method: `POST`,
+          headers: { "Content-Type": `text/plain` },
+          body: `more data`,
+        })
+        expect(postAfter.status).toBe(404)
+      }
+    )
 
-    test(`should return 404 on HEAD after Expires-At passes`, async () => {
-      const streamPath = `/v1/stream/expires-at-head-test-${Date.now()}`
+    test.concurrent(
+      `should return 404 on HEAD after Expires-At passes`,
+      async () => {
+        const streamPath = uniquePath(`expires-at-head`)
 
-      // Create stream that expires in 1 second
-      const expiresAt = new Date(Date.now() + 1000).toISOString()
-      const createResponse = await fetch(`${getBaseUrl()}${streamPath}`, {
-        method: `PUT`,
-        headers: {
-          "Content-Type": `text/plain`,
-          "Stream-Expires-At": expiresAt,
-        },
-      })
-      expect(createResponse.status).toBe(201)
+        // Create stream that expires in 1 second
+        const expiresAt = new Date(Date.now() + 1000).toISOString()
+        const createResponse = await fetch(`${getBaseUrl()}${streamPath}`, {
+          method: `PUT`,
+          headers: {
+            "Content-Type": `text/plain`,
+            "Stream-Expires-At": expiresAt,
+          },
+        })
+        expect(createResponse.status).toBe(201)
 
-      // Verify stream exists immediately
-      const headBefore = await fetch(`${getBaseUrl()}${streamPath}`, {
-        method: `HEAD`,
-      })
-      expect(headBefore.status).toBe(200)
+        // Verify stream exists immediately
+        const headBefore = await fetch(`${getBaseUrl()}${streamPath}`, {
+          method: `HEAD`,
+        })
+        expect(headBefore.status).toBe(200)
 
-      // Wait for expiry time to pass
-      await sleep(1500)
+        // Wait for expiry time to pass
+        await sleep(1500)
 
-      // Stream should no longer exist
-      const headAfter = await fetch(`${getBaseUrl()}${streamPath}`, {
-        method: `HEAD`,
-      })
-      expect(headAfter.status).toBe(404)
-    })
+        // Stream should no longer exist
+        const headAfter = await fetch(`${getBaseUrl()}${streamPath}`, {
+          method: `HEAD`,
+        })
+        expect(headAfter.status).toBe(404)
+      }
+    )
 
-    test(`should return 404 on GET after Expires-At passes`, async () => {
-      const streamPath = `/v1/stream/expires-at-get-test-${Date.now()}`
+    test.concurrent(
+      `should return 404 on GET after Expires-At passes`,
+      async () => {
+        const streamPath = uniquePath(`expires-at-get`)
 
-      // Create stream that expires in 1 second
-      const expiresAt = new Date(Date.now() + 1000).toISOString()
-      const createResponse = await fetch(`${getBaseUrl()}${streamPath}`, {
-        method: `PUT`,
-        headers: {
-          "Content-Type": `text/plain`,
-          "Stream-Expires-At": expiresAt,
-        },
-        body: `test data`,
-      })
-      expect(createResponse.status).toBe(201)
+        // Create stream that expires in 1 second
+        const expiresAt = new Date(Date.now() + 1000).toISOString()
+        const createResponse = await fetch(`${getBaseUrl()}${streamPath}`, {
+          method: `PUT`,
+          headers: {
+            "Content-Type": `text/plain`,
+            "Stream-Expires-At": expiresAt,
+          },
+          body: `test data`,
+        })
+        expect(createResponse.status).toBe(201)
 
-      // Verify stream is readable immediately
-      const getBefore = await fetch(`${getBaseUrl()}${streamPath}`, {
-        method: `GET`,
-      })
-      expect(getBefore.status).toBe(200)
+        // Verify stream is readable immediately
+        const getBefore = await fetch(`${getBaseUrl()}${streamPath}`, {
+          method: `GET`,
+        })
+        expect(getBefore.status).toBe(200)
 
-      // Wait for expiry time to pass
-      await sleep(1500)
+        // Wait for expiry time to pass
+        await sleep(1500)
 
-      // Stream should no longer exist
-      const getAfter = await fetch(`${getBaseUrl()}${streamPath}`, {
-        method: `GET`,
-      })
-      expect(getAfter.status).toBe(404)
-    })
+        // Stream should no longer exist
+        const getAfter = await fetch(`${getBaseUrl()}${streamPath}`, {
+          method: `GET`,
+        })
+        expect(getAfter.status).toBe(404)
+      }
+    )
 
-    test(`should return 404 on POST append after Expires-At passes`, async () => {
-      const streamPath = `/v1/stream/expires-at-post-test-${Date.now()}`
+    test.concurrent(
+      `should return 404 on POST append after Expires-At passes`,
+      async () => {
+        const streamPath = uniquePath(`expires-at-post`)
 
-      // Create stream that expires in 1 second
-      const expiresAt = new Date(Date.now() + 1000).toISOString()
-      const createResponse = await fetch(`${getBaseUrl()}${streamPath}`, {
-        method: `PUT`,
-        headers: {
-          "Content-Type": `text/plain`,
-          "Stream-Expires-At": expiresAt,
-        },
-      })
-      expect(createResponse.status).toBe(201)
+        // Create stream that expires in 1 second
+        const expiresAt = new Date(Date.now() + 1000).toISOString()
+        const createResponse = await fetch(`${getBaseUrl()}${streamPath}`, {
+          method: `PUT`,
+          headers: {
+            "Content-Type": `text/plain`,
+            "Stream-Expires-At": expiresAt,
+          },
+        })
+        expect(createResponse.status).toBe(201)
 
-      // Verify append works immediately
-      const postBefore = await fetch(`${getBaseUrl()}${streamPath}`, {
-        method: `POST`,
-        headers: { "Content-Type": `text/plain` },
-        body: `appended data`,
-      })
-      expect([200, 204]).toContain(postBefore.status)
+        // Verify append works immediately
+        const postBefore = await fetch(`${getBaseUrl()}${streamPath}`, {
+          method: `POST`,
+          headers: { "Content-Type": `text/plain` },
+          body: `appended data`,
+        })
+        expect([200, 204]).toContain(postBefore.status)
 
-      // Wait for expiry time to pass
-      await sleep(1500)
+        // Wait for expiry time to pass
+        await sleep(1500)
 
-      // Append should fail - stream no longer exists
-      const postAfter = await fetch(`${getBaseUrl()}${streamPath}`, {
-        method: `POST`,
-        headers: { "Content-Type": `text/plain` },
-        body: `more data`,
-      })
-      expect(postAfter.status).toBe(404)
-    })
+        // Append should fail - stream no longer exists
+        const postAfter = await fetch(`${getBaseUrl()}${streamPath}`, {
+          method: `POST`,
+          headers: { "Content-Type": `text/plain` },
+          body: `more data`,
+        })
+        expect(postAfter.status).toBe(404)
+      }
+    )
   })
 
   // ============================================================================
