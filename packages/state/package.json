@@ -4,6 +4,20 @@
   "version": "0.1.1",
   "author": "Durable Stream contributors",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/durable-streams/durable-streams.git",
+    "directory": "packages/state"
+  },
+  "bugs": {
+    "url": "https://github.com/durable-streams/durable-streams/issues"
+  },
+  "keywords": [
+    "durable-streams",
+    "state",
+    "protocol",
+    "typescript"
+  ],
   "type": "module",
   "exports": {
     "./package.json": "./package.json",

@@ -1,24 +1,26 @@
 {
   "name": "@durable-streams/cli",
-  "version": "0.1.1",
   "description": "CLI tool for working with Durable Streams",
+  "version": "0.1.1",
   "author": "Durable Stream contributors",
   "license": "Apache-2.0",
-  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/durable-streams/durable-streams.git",
+    "directory": "packages/cli"
+  },
+  "bugs": {
+    "url": "https://github.com/durable-streams/durable-streams/issues"
+  },
+  "keywords": [
+    "durable-streams",
+    "streaming",
+    "cli",
+    "typescript"
+  ],
   "bin": {
     "durable-stream": "./dist/index.js",
     "durable-stream-dev": "./bin/durable-stream-dev.mjs"
-  },
-  "main": "./dist/index.js",
-  "files": [
-    "dist",
-    "bin"
-  ],
-  "scripts": {
-    "build": "tsdown",
-    "dev": "tsdown --watch",
-    "start:dev": "tsx --watch example-server.ts",
-    "link:dev": "pnpm link --global"
   },
   "dependencies": {
     "@durable-streams/client": "workspace:*"
@@ -32,5 +34,18 @@
   },
   "engines": {
     "node": ">=18.0.0"
-  }
+  },
+  "files": [
+    "dist",
+    "bin"
+  ],
+  "license": "Apache-2.0",
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown --watch",
+    "link:dev": "pnpm link --global",
+    "start:dev": "tsx --watch example-server.ts"
+  },
+  "type": "module"
 }
