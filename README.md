@@ -105,35 +105,11 @@ This monorepo contains:
 - **[@durable-streams/client-conformance-tests](./packages/client-conformance-tests)** - Client protocol compliance tests (110 tests)
 - **[@durable-streams/benchmarks](./packages/benchmarks)** - Performance benchmarking suite
 
-## Try It Out
-
-The fastest way to see Durable Streams in action:
-
-```bash
-# 1. Download and run the server binary (or use: pnpm start:dev from source)
-./durable-streams-server dev
-
-# 2. Create a stream
-curl -X PUT http://localhost:4437/v1/stream/my-first-stream \
-  -H 'Content-Type: text/plain'
-
-# 3. Append data
-curl -X POST http://localhost:4437/v1/stream/my-first-stream \
-  -H 'Content-Type: text/plain' \
-  -d 'Hello, Durable Streams!'
-
-# 4. Read the stream
-curl http://localhost:4437/v1/stream/my-first-stream
-
-# 5. Watch live (in another terminal, then POST more data)
-curl -N "http://localhost:4437/v1/stream/my-first-stream?offset=-1&live=sse"
-```
-
 ## Try It Out Locally
 
 <img width="5088" height="3820" alt="524000540-460eb79d-3970-4882-b39a-50bfd9d4c63d" src="https://github.com/user-attachments/assets/39090c01-38b1-4e7d-9b39-a8a13cec14d2" />
 
-For a richer experience, run the local server and use either the web-based Test UI or the command-line CLI:
+Run the local server and use either the web-based Test UI or the command-line CLI:
 
 ### Option 1: Test UI
 

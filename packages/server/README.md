@@ -49,7 +49,10 @@ const server = new DurableStreamTestServer({
 Persistent storage with streams stored as log files and LMDB for metadata:
 
 ```typescript
-import { DurableStreamTestServer, FileBackedStreamStore } from "@durable-streams/server"
+import {
+  DurableStreamTestServer,
+  FileBackedStreamStore,
+} from "@durable-streams/server"
 
 const store = new FileBackedStreamStore({
   path: "./data/streams",
@@ -65,7 +68,10 @@ const server = new DurableStreamTestServer({
 Track stream lifecycle events (creation, deletion):
 
 ```typescript
-import { DurableStreamTestServer, createRegistryHooks } from "@durable-streams/server"
+import {
+  DurableStreamTestServer,
+  createRegistryHooks,
+} from "@durable-streams/server"
 
 const server = new DurableStreamTestServer({
   port: 4437,
