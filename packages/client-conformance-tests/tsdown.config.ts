@@ -1,13 +1,16 @@
-import { defineConfig } from "tsdown"
+import type { Options } from "tsdown"
 
-export default defineConfig({
+const config: Options = {
   entry: [
-    `./src/index.ts`,
-    `./src/cli.ts`,
-    `./src/protocol.ts`,
-    `./src/adapters/typescript-adapter.ts`,
+    "src/index.ts",
+    "src/cli.ts",
+    "src/protocol.ts",
+    "src/adapters/typescript-adapter.ts",
   ],
-  format: `esm`,
-  platform: `node`,
+  format: ["esm", "cjs"],
+  platform: "node",
   dts: true,
-})
+  clean: true,
+}
+
+export default config
