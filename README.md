@@ -555,10 +555,6 @@ See [@durable-streams/server](./packages/server) for more details.
 
 - [ahimsalabs/durable-streams-go](https://github.com/ahimsalabs/durable-streams-go): A client and server implementation with full conformance test coverage.
 
-**Python**
-
-- [durable-streams](https://pypi.org/project/durable-streams/): Python client (`pip install durable-streams`)
-
 ## CLI Tool
 
 ```bash
