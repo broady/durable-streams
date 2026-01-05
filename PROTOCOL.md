@@ -252,7 +252,7 @@ Where `{stream-url}` is the URL of the stream. Returns bytes starting from the s
 #### Query Parameters
 
 - `offset` (optional)
-  - Start offset token. If omitted, defaults to the stream start (offset 0).
+  - Start offset token. If omitted, defaults to the stream start (offset -1).
 
 #### Response Codes
 
