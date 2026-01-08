@@ -399,7 +399,36 @@ Offsets are opaque tokens that identify positions within a stream. They have the
 
 **Format**: Offset tokens are opaque, case-sensitive strings. Their internal structure is implementation-defined. Offsets are single tokens and **MUST NOT** contain commas, ampersands, equals signs, or question marks (to avoid conflict with URL query parameter syntax). Servers **SHOULD** use URL-safe characters to avoid encoding issues, but clients **MUST** properly URL-encode offset values when including them in query parameters. Servers **SHOULD** keep offsets reasonably short (under 256 characters) since they appear in every request URL.
 
-**Sentinel Value**: The special offset value `-1` represents the beginning of the stream. Clients **MAY** use `offset=-1` as an explicit way to request data from the start. This is semantically equivalent to omitting the offset parameter. Servers **MUST** recognize `-1` as a valid offset that returns data from the beginning of the stream.
+**Sentinel Values**: The protocol defines two special offset sentinel values:
+
+- **`-1` (Stream Beginning)**: The special offset value `-1` represents the beginning of the stream. Clients **MAY** use `offset=-1` as an explicit way to request data from the start. This is semantically equivalent to omitting the offset parameter. Servers **MUST** recognize `-1` as a valid offset that returns data from the beginning of the stream.
+
+- **`now` (Current Tail Position)**: The special offset value `now` allows clients to skip all existing data and begin reading from the current tail position. This is useful for applications that only care about future data (e.g., presence tracking, live monitoring, late joiners to a conversation). The behavior varies by read mode:
+
+  **Catch-up mode** (`offset=now` without `live` parameter):
+  - Servers **MUST** return `200 OK` with an empty response body appropriate to the stream's content type:
+    - For `application/json` streams: the body **MUST** be `[]` (empty JSON array), consistent with Section 7.1
+    - For all other content types: the body **MUST** be 0 bytes (empty)
+  - Servers **MUST** include a `Stream-Next-Offset` header set to the current tail position
+  - Servers **MUST** include `Stream-Up-To-Date: true` header
+  - Servers **SHOULD** return `Cache-Control: no-store` to prevent caching of the tail offset
+  - The response **MUST** contain no data messages, regardless of stream content
+
+  **Long-poll mode** (`offset=now&live=long-poll`):
+  - Servers **MUST** immediately begin waiting for new data (no initial empty response)
+  - This eliminates a round-trip: clients can subscribe to future data in a single request
+  - If new data arrives during the wait, servers return `200 OK` with the new data
+  - If the timeout expires, servers return `204 No Content` with `Stream-Up-To-Date: true`
+  - The `Stream-Next-Offset` header **MUST** be set to the tail position
+
+  **SSE mode** (`offset=now&live=sse`):
+  - Servers **MUST** immediately begin the SSE stream from the tail position
+  - The first control event **MUST** include the tail offset in `streamNextOffset`
+  - If no data has arrived, the first control event **MUST** include `upToDate: true`
+  - If data arrives before the first control event, `upToDate` reflects the current state
+  - No historical data is sent; only future data events are streamed
+
+**Reserved Values**: The sentinel values `-1` and `now` are reserved by the protocol. Server implementations **MUST NOT** generate these strings as actual stream offsets (in `Stream-Next-Offset` headers or SSE control events). This ensures clients can always distinguish between sentinel requests and real offset values.
 
 The opaque nature of offsets enables important server-side optimizations. For example, offsets may encode chunk file identifiers, allowing catch-up requests to be served directly from object storage without touching the main database.
 
@@ -485,7 +514,7 @@ This enables CDN/proxy caching while allowing stale content to be served during 
 
 **ETag Usage:**
 
-Servers **MUST** generate `ETag` headers for GET responses. Clients **MAY** use `If-None-Match` with the `ETag` value on repeat catch-up requests. When a client provides a valid `If-None-Match` header that matches the current ETag, servers **MUST** respond with `304 Not Modified` (with no body) instead of re-sending the same data. This is essential for fast loading and efficient bandwidth usage.
+Servers **MUST** generate `ETag` headers for GET responses, except for `offset=now` responses. Clients **MAY** use `If-None-Match` with the `ETag` value on repeat catch-up requests. When a client provides a valid `If-None-Match` header that matches the current ETag, servers **MUST** respond with `304 Not Modified` (with no body) instead of re-sending the same data. This is essential for fast loading and efficient bandwidth usage.
 
 **Query Parameter Ordering:**
 

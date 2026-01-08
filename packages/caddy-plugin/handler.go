@@ -239,17 +239,53 @@ func (h *Handler) handleRead(w http.ResponseWriter, r *http.Request, path string
 
 	// Handle SSE mode first (before reading)
 	if liveMode == "sse" {
-		return h.handleSSE(w, r, path, offset, cursor)
+		// For SSE with offset=now, convert to actual tail offset
+		sseOffset := offset
+		if offset.IsNow() {
+			sseOffset = meta.CurrentOffset
+		}
+		return h.handleSSE(w, r, path, sseOffset, cursor)
+	}
+
+	// For offset=now, convert to actual tail offset
+	// This allows long-poll to immediately start waiting for new data
+	effectiveOffset := offset
+	isNowOffset := offset.IsNow()
+	if isNowOffset {
+		effectiveOffset = meta.CurrentOffset
+	}
+
+	// Handle catch-up mode offset=now: return empty response with tail offset
+	// For long-poll mode, we fall through to wait for new data instead
+	if isNowOffset && liveMode != "long-poll" {
+		w.Header().Set("Content-Type", meta.ContentType)
+		w.Header().Set(HeaderStreamNextOffset, meta.CurrentOffset.String())
+		w.Header().Set(HeaderStreamUpToDate, "true")
+
+		// Prevent caching - tail offset changes with each append
+		w.Header().Set("Cache-Control", "no-store")
+
+		// No ETag for offset=now responses - Cache-Control: no-store makes ETag unnecessary
+		// and some CDNs may behave unexpectedly with both headers
+
+		// For JSON mode, return empty array; otherwise empty body
+		if store.IsJSONContentType(meta.ContentType) {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("[]"))
+		} else {
+			w.WriteHeader(http.StatusOK)
+		}
+		return nil
 	}
 
 	// Read messages
-	messages, _, err := h.store.Read(path, offset)
+	messages, _, err := h.store.Read(path, effectiveOffset)
 	if err != nil {
 		return err
 	}
 
 	// Calculate next offset
-	nextOffset := offset
+	nextOffset := effectiveOffset
 	if len(messages) > 0 {
 		nextOffset = messages[len(messages)-1].Offset
 	} else {
@@ -257,21 +293,25 @@ func (h *Handler) handleRead(w http.ResponseWriter, r *http.Request, path string
 		nextOffset = meta.CurrentOffset
 	}
 
-	// Handle long-poll mode
-	if liveMode == "long-poll" && len(messages) == 0 {
+	// Handle long-poll mode - wait if no messages and either:
+	// 1. Client used offset=now (wants to wait for future data)
+	// 2. Client is caught up (at the tail)
+	shouldWait := liveMode == "long-poll" && len(messages) == 0 && (isNowOffset || effectiveOffset.Equal(meta.CurrentOffset))
+	if shouldWait {
 		// Client is caught up, wait for new data
 		timeout := time.Duration(h.LongPollTimeout)
 		ctx, cancel := context.WithTimeout(r.Context(), timeout)
 		defer cancel()
 
 		var timedOut bool
-		messages, timedOut, err = h.store.WaitForMessages(ctx, path, offset, timeout)
+		messages, timedOut, err = h.store.WaitForMessages(ctx, path, effectiveOffset, timeout)
 		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				// Timeout or client disconnect - return 204 with current offset
 				w.Header().Set("Content-Type", meta.ContentType)
-				w.Header().Set(HeaderStreamNextOffset, offset.String())
+				w.Header().Set(HeaderStreamNextOffset, effectiveOffset.String())
 				w.Header().Set(HeaderStreamUpToDate, "true")
+				w.Header().Set(HeaderStreamCursor, generateResponseCursor(cursor))
 				w.WriteHeader(http.StatusNoContent)
 				return nil
 			}
@@ -281,8 +321,9 @@ func (h *Handler) handleRead(w http.ResponseWriter, r *http.Request, path string
 		if timedOut {
 			// Timeout - return 204 with current offset
 			w.Header().Set("Content-Type", meta.ContentType)
-			w.Header().Set(HeaderStreamNextOffset, offset.String())
+			w.Header().Set(HeaderStreamNextOffset, effectiveOffset.String())
 			w.Header().Set(HeaderStreamUpToDate, "true")
+			w.Header().Set(HeaderStreamCursor, generateResponseCursor(cursor))
 			w.WriteHeader(http.StatusNoContent)
 			return nil
 		}
